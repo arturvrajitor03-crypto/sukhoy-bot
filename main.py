@@ -1,42 +1,37 @@
-import os, asyncio
+import os, requests
 from flask import Flask, request
-from telegram import Update
-from telegram.ext import Application, CommandHandler
 
 TOKEN = os.getenv("BOT_TOKEN","").strip()
 app = Flask(__name__)
 
-application = Application.builder().token(TOKEN).build()
-
-async def start(update, context):
-    await update.message.reply_text("Бот живой! ✅\nЯ работаю! Пиши /dry")
-
-async def dry(update, context):
-    await update.message.reply_text("Принял /dry ✅\nСухой режим!")
-
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CommandHandler("dry", dry))
+def send(chat_id, text):
+    try:
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+                      json={"chat_id": chat_id, "text": text}, timeout=10)
+    except Exception as e:
+        print(f"SEND ERROR {e}")
 
 @app.route('/')
 def home():
-    return f"BOT OK Token={bool(TOKEN)}"
+    return f"BOT OK Token={bool(TOKEN)} SIMPLE MODE"
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
         data = request.get_json(force=True)
-        update = Update.de_json(data, application.bot)
-
-        async def run():
-            if not application._initialized:
-                await application.initialize()
-            await application.process_update(update)
-
-        asyncio.run(run())
-        return "ok"
+        print(f"GOT {data}", flush=True)
+        if "message" in data and "text" in data["message"]:
+            chat_id = data["message"]["chat"]["id"]
+            text = data["message"]["text"]
+            if text == "/start":
+                send(chat_id, "Бот живой! ✅\nНаконец-то работает! Пиши /dry")
+            elif text.startswith("/dry"):
+                send(chat_id, "Принял /dry ✅\nСухой режим включен!")
+            else:
+                send(chat_id, f"Ты написал: {text}\nКоманды: /start /dry")
     except Exception as e:
-        print(f"ERROR {e}", flush=True)
-        return "ok"
+        print(f"WEBHOOK ERROR {e}", flush=True)
+    return "ok"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
