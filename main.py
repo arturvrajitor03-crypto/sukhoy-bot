@@ -1,40 +1,69 @@
 import os
+import asyncio
 import threading
 import logging
 from flask import Flask
 from telegram import Update
 from telegram.ext import Application
 from telegram.ext import CommandHandler
-from telegram.ext import ContextTypes
 
-logging.basicConfig(level=logging.INFO)
-BOT_TOKEN = os.getenv("BOT_TOKEN","").strip()
-print(f"TOKEN exists={bool(BOT_TOKEN)}")
+logging.basicConfig(
+    level=logging.INFO
+)
+
+TOKEN = os.getenv(
+    "BOT_TOKEN", ""
+).strip()
+
+print(
+    f"TOKEN={bool(TOKEN)}",
+    flush=True
+)
 
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return f"OK {bool(BOT_TOKEN)}"
+    return f"OK {bool(TOKEN)}"
 
-async def start(update: Update, context):
-    await update.message.reply_text("Привет! ✅ Работаю!")
+async def start(update, context):
+    await update.message.reply_text(
+        "Привет! Работаю!"
+    )
 
-async def status(update: Update, context):
-    await update.message.reply_text("✅ Online!")
+async def status(update, context):
+    await update.message.reply_text(
+        "Online!"
+    )
 
 def run_bot():
-    if not BOT_TOKEN:
-        print("No token!")
+    if not TOKEN:
+        print("No token!", flush=True)
         return
-    print("Starting polling...")
-    a = Application.builder().token(BOT_TOKEN).build()
-    a.add_handler(CommandHandler("start", start))
-    a.add_handler(CommandHandler("status", status))
-    print("Polling OK!")
-    a.run_polling()
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        print(
+            "Starting polling...",
+            flush=True
+        )
+        a = Application.builder().token(
+            TOKEN
+        ).build()
+        a.add_handler(
+            CommandHandler("start", start)
+        )
+        a.add_handler(
+            CommandHandler("status", status)
+        )
+        print("Polling OK!", flush=True)
+        a.run_polling(
+            stop_signals=None
+        )
+    except Exception as e:
+        print(f"Err: {e}", flush=True)
 
-print("Init thread...")
+print("Init thread...", flush=True)
 t = threading.Thread(
     target=run_bot,
     daemon=True
@@ -42,8 +71,8 @@ t = threading.Thread(
 t.start()
 
 if __name__ == '__main__':
-    port = int(os.getenv("PORT", "10000"))
+    p = int(os.getenv("PORT", "10000"))
     app.run(
         host='0.0.0.0',
-        port=port
+        port=p
     )
