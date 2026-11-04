@@ -1,37 +1,34 @@
 import os
 import threading
 from flask import Flask
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler
 
-app_flask = Flask(__name__)
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+app = Flask(__name__)
 
-@app_flask.route('/')
+@app.route('/')
 def home():
     return "Bot is running!"
 
-TOKEN = os.getenv("BOT_TOKEN")
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Бот работает! ✅")
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(f"Получил: {update.message.text}")
+async def start(update, context):
+    await update.message.reply_text("Бот работает! ✅ Токен настроен!")
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
-    app_flask.run(host='0.0.0.0', port=port)
+    app.run(host="0.0.0.0", port=port)
 
 def run_bot():
-    if not TOKEN:
-        print("ERROR: BOT_TOKEN missing!")
-        return
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    print("Bot starting...")
-    app.run_polling()
+    application = Application.builder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    print("Bot started polling...")
+    application.run_polling()
 
 if __name__ == "__main__":
-    threading.Thread(target=run_flask, daemon=True).start()
-    run_bot()
+    if not BOT_TOKEN:
+        print("ERROR: BOT_TOKEN missing!")
+        # Запускаем Flask чтобы Render не ругался
+        run_flask()
+    else:
+        # Flask в фоне, бот в главном потоке
+        threading.Thread(target=run_flask, daemon=True).start()
+        run_bot()
