@@ -3,44 +3,47 @@ import threading
 import logging
 from flask import Flask
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application
+from telegram.ext import CommandHandler
+from telegram.ext import ContextTypes
 
-# Настройка логов
 logging.basicConfig(level=logging.INFO)
-
-BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
-print(f"TOKEN check: exists={bool(BOT_TOKEN)} len={len(BOT_TOKEN)}")
+BOT_TOKEN = os.getenv("BOT_TOKEN","").strip()
+print(f"TOKEN exists={bool(BOT_TOKEN)}")
 
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Sukhoy Bot is running! Token OK: " + str(bool(BOT_TOKEN))
+    return f"OK {bool(BOT_TOKEN)}"
 
-# --- Команды бота ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Привет! Я Sukhoy Bot ✅ Работаю!\n/status - проверить")
+async def start(update: Update, context):
+    await update.message.reply_text("Привет! ✅ Работаю!")
 
-async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("✅ Online! Деплой 84feb00 работает")
+async def status(update: Update, context):
+    await update.message.reply_text("✅ Online!")
 
 def run_bot():
     if not BOT_TOKEN:
-        print("CRITICAL: BOT_TOKEN is missing! Add it in Render -> Environment")
+        print("No token!")
         return
-    
     print("Starting polling...")
-    application = Application.builder().token(BOT_TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("status", status))
-    
-    print("Polling started successfully!")
-    application.run_polling()
+    a = Application.builder().token(BOT_TOKEN).build()
+    a.add_handler(CommandHandler("start", start))
+    a.add_handler(CommandHandler("status", status))
+    print("Polling OK!")
+    a.run_polling()
+
+print("Init thread...")
+t = threading.Thread(
+    target=run_bot,
+    daemon=True
+)
+t.start()
 
 if __name__ == '__main__':
-    # Запускаем бота в отдельном потоке
-    threading.Thread(target=run_bot, daemon=True).start()
-    
-    # Запускаем Flask (нужен для Render)
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    port = int(os.getenv("PORT", "10000"))
+    app.run(
+        host='0.0.0.0',
+        port=port
+    )
