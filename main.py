@@ -2,28 +2,32 @@ import os
 import threading
 from flask import Flask
 from telegram import Update
-from telegram.ext import ApplicationBuilder
-from telegram.ext import CommandHandler
-from telegram.ext import ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-BOT=os.getenv("BOT_TOKEN")
-app=Flask(__name__)
+TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN")
 
-@app.route('/')
+app_flask = Flask(__name__)
+
+@app_flask.route("/")
 def home():
- return "OK"
-async def start(u,c):
-     
- await u.message.reply_text("alive /dry")
+    return "Bot alive", 200
 
-async def dry(u,c):
- await u.message.reply_text("SELL 3982 BUY 3958")
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Бот работает! ✅ Напиши /dry")
 
-def run():
- b=ApplicationBuilder().token(BOT).build()
- b.add_handler(CommandHandler("start",start))
- b.add_handler(CommandHandler("dry",dry))
- b.run_polling()
+async def dry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🔥 Режим Сухого включен!\nSELL 3982 BUY 3958")
 
-threading.Thread(target=run,daemon=True).start()
-app.run(host='0.0.0.0',port=10000)
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app_flask.run(host="0.0.0.0", port=port)
+
+def main():
+    threading.Thread(target=run_flask, daemon=True).start()
+    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("dry", dry))
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
