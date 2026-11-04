@@ -1,34 +1,29 @@
-import os
-import threading
+import os, threading, time
 from flask import Flask
-from telegram.ext import Application, CommandHandler
-
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN","").strip()
 app = Flask(__name__)
-
 @app.route('/')
 def home():
     return "Bot is running!"
-
-async def start(update, context):
-    await update.message.reply_text("Бот работает! ✅ Токен настроен!")
-
 def run_flask():
-    port = int(os.environ.get("PORT", 10000))
+    port = int(os.environ.get("PORT",10000))
     app.run(host="0.0.0.0", port=port)
 
-def run_bot():
-    application = Application.builder().token(BOT_TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
-    print("Bot started polling...")
-    application.run_polling()
-
 if __name__ == "__main__":
+    threading.Thread(target=run_flask, daemon=True).start()
     if not BOT_TOKEN:
         print("ERROR: BOT_TOKEN missing!")
-        # Запускаем Flask чтобы Render не ругался
-        run_flask()
-    else:
-        # Flask в фоне, бот в главном потоке
-        threading.Thread(target=run_flask, daemon=True).start()
-        run_bot()
+        while True: time.sleep(3600)
+    try:
+        from telegram.ext import Application, CommandHandler
+        async def start(update, context):
+            await update.message.reply_text("Бот работает! ✅")
+        print(f"Starting bot...")
+        application = Application.builder().token(BOT_TOKEN).build()
+        application.add_handler(CommandHandler("start", start))
+        application.run_polling()
+    except Exception as e:
+        print(f"BOT ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        while True: time.sleep(3600)
