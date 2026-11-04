@@ -13,11 +13,10 @@ def home():
 TOKEN = os.getenv("BOT_TOKEN")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Бот работает! ✅\nОтправь артикул WB.")
+    await update.message.reply_text("Бот работает! ✅")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-    await update.message.reply_text(f"Получил: {text}")
+    await update.message.reply_text(f"Получил: {update.message.text}")
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
