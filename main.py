@@ -1,55 +1,44 @@
-import os
+import os, asyncio, logging
 from flask import Flask, request
 from telegram import Update
-from telegram.ext import Application, CommandHandler
-import asyncio
-import threading
+from telegram.ext import Application, CommandHandler, ContextTypes
 
 TOKEN = os.getenv("BOT_TOKEN","").strip()
-WEB_URL = "https://sukhoy-bot.onrender.com"
 
 app = Flask(__name__)
+logging.basicConfig(level=logging.INFO)
 
-# Создаем приложение ТГ
+# Создаем бота
 application = Application.builder().token(TOKEN).build()
 
-async def start(update, context):
-    await update.message.reply_text("Бот живой! ✅\nПиши /dry")
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Бот живой! ✅\nЯ работаю! Пиши /dry")
 
-async def dry(update, context):
-    await update.message.reply_text("Принял /dry ✅\nСухой режим включен!")
+async def dry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Принял /dry ✅\nСухой режим!")
 
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("dry", dry))
 
-# Для обработки вебхука
-async def process_update(data):
-    async with application:
-        await application.process_update(Update.de_json(data, application.bot))
+# Инициализируем бота один раз при старте
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+loop.run_until_complete(application.initialize())
 
 @app.route('/')
 def home():
-    return f"BOT OK Token={bool(TOKEN)}"
+    return f"BOT OK Token={bool(TOKEN)} Live=True"
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    data = request.get_json(force=True)
-    asyncio.run(process_update(data))
-    return "ok"
-
-def set_webhook():
-    import urllib.request
     try:
-        # Удаляем старый и ставим новый
-        url = f"{WEB_URL}/webhook"
-        urllib.request.urlopen(f"https://api.telegram.org/bot{TOKEN}/deleteWebhook?drop_pending_updates=true", timeout=10).read()
-        urllib.request.urlopen(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={url}", timeout=10).read()
-        print(f"Webhook set to {url}", flush=True)
+        data = request.get_json(force=True)
+        update = Update.de_json(data, application.bot)
+        loop.run_until_complete(application.process_update(update))
+        return "ok"
     except Exception as e:
-        print(f"Webhook error {e}", flush=True)
-
-# Ставим вебхук в отдельном потоке после старта
-threading.Timer(3, set_webhook).start()
+        print(f"WEBHOOK ERROR: {e}", flush=True)
+        return "error", 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
