@@ -1,38 +1,46 @@
-import os, threading
+import os
+import threading
+import urllib.request
 from flask import Flask
 from telegram.ext import Application, CommandHandler
 
-TOKEN = os.getenv("BOT_TOKEN","").strip()
-print(f"TOKEN exists: {bool(TOKEN)} len={len(TOKEN)}", flush=True)
+TOKEN = os.getenv("BOT_TOKEN", "").strip()
 
 app = Flask(__name__)
+
 @app.route('/')
 def home():
-    return f"OK {bool(TOKEN)} len={len(TOKEN)}"
+    return f"BOT OK Token={bool(TOKEN)}"
 
 async def start(update, context):
-    print(f"Got /start", flush=True)
-    await update.message.reply_text("Бот работает! ✅ Напиши /dry")
+    await update.message.reply_text("Бот живой! ✅ Пиши /dry")
 
 async def dry(update, context):
-    print(f"Got /dry", flush=True)
-    await update.message.reply_text("Принял: /dry ✅ Готов работать!")
+    await update.message.reply_text("Принял /dry ✅ Работаем!")
 
 def run_bot():
+    print("=== BOT THREAD START ===", flush=True)
+    if not TOKEN:
+        print("NO TOKEN", flush=True)
+        return
+    # Авто-удаление вебхука
     try:
-        print("Starting bot polling...", flush=True)
+        urllib.request.urlopen(f"https://api.telegram.org/bot{TOKEN}/deleteWebhook?drop_pending_updates=true", timeout=10).read()
+        print("=== WEBHOOK DELETED ===", flush=True)
+    except Exception as e:
+        print(f"Webhook delete fail: {e}", flush=True)
+
+    try:
         application = Application.builder().token(TOKEN).build()
         application.add_handler(CommandHandler("start", start))
         application.add_handler(CommandHandler("dry", dry))
-        print("Polling started!", flush=True)
+        print("=== POLLING STARTED ===", flush=True)
         application.run_polling(drop_pending_updates=True)
     except Exception as e:
-        print(f"BOT CRASHED: {e}", flush=True)
-        import traceback
-        traceback.print_exc()
+        print(f"=== BOT CRASHED: {e} ===", flush=True)
 
 threading.Thread(target=run_bot, daemon=True).start()
-print("Thread launched", flush=True)
+print("=== THREAD LAUNCHED ===", flush=True)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
