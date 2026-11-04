@@ -1,31 +1,46 @@
-import os, threading, time, logging
+import os
+import threading
+import logging
 from flask import Flask
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes
+
+# Настройка логов
 logging.basicConfig(level=logging.INFO)
-BOT_TOKEN = os.getenv("BOT_TOKEN","").strip().replace('"','').replace("'","")
+
+BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+print(f"TOKEN check: exists={bool(BOT_TOKEN)} len={len(BOT_TOKEN)}")
+
 app = Flask(__name__)
+
 @app.route('/')
 def home():
-    return "Bot is running!"
-def run_flask():
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
-if __name__ == "__main__":
-    threading.Thread(target=run_flask, daemon=True).start()
+    return "Sukhoy Bot is running! Token OK: " + str(bool(BOT_TOKEN))
+
+# --- Команды бота ---
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Привет! Я Sukhoy Bot ✅ Работаю!\n/status - проверить")
+
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("✅ Online! Деплой 84feb00 работает")
+
+def run_bot():
     if not BOT_TOKEN:
-        print("BOT_TOKEN missing!"); 
-        while True: time.sleep(3600)
-    from telegram.ext import Application, CommandHandler
-    async def start(update, context):
-        await update.message.reply_text("Бот работает! ✅ Напиши /dry")
-    async def dry(update, context):
-        await update.message.reply_text("🔥 Режим Сухого включен! Бот живой!")
-    while True:
-        try:
-            print("Starting polling...")
-            app_bot = Application.builder().token(BOT_TOKEN).build()
-            app_bot.add_handler(CommandHandler("start", start))
-            app_bot.add_handler(CommandHandler("dry", dry))
-            app_bot.run_polling(drop_pending_updates=True)
-        except Exception as e:
-            print(f"BOT ERROR: {e}")
-            import traceback; traceback.print_exc()
-            time.sleep(5)
+        print("CRITICAL: BOT_TOKEN is missing! Add it in Render -> Environment")
+        return
+    
+    print("Starting polling...")
+    application = Application.builder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("status", status))
+    
+    print("Polling started successfully!")
+    application.run_polling()
+
+if __name__ == '__main__':
+    # Запускаем бота в отдельном потоке
+    threading.Thread(target=run_bot, daemon=True).start()
+    
+    # Запускаем Flask (нужен для Render)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
