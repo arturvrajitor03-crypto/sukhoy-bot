@@ -1,4 +1,4 @@
-import os, io, threading, time
+import os, io
 from flask import Flask, request
 import telebot
 from PIL import Image, ImageDraw, ImageFont
@@ -7,17 +7,21 @@ import requests
 TOKEN = "9241841874:AAELImqP5STFIImsLhZLfeyyo6traRdYSPA"
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
-CHATS = set()
 
-def get_data():
+def get_price():
     try:
-        url = "https://api.binance.com/api/v3/klines?symbol=PAXGUSDT&interval=15m&limit=100"
-        klines = requests.get(url, timeout=10).json()
-        closes = [float(k[4]) for k in klines]
-        price = closes[-1]
-        ema50 = sum(closes[-50:]) / 50
-        gains = []
-        losses = []
-        for i in range(1,len(closes)):
-            diff = closes[i]-closes[i-1]
-            if diff>0
+        r = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT", timeout=5).json()
+        return float(r['price'])
+    except:
+        return 4128.7
+
+def make_image(side, entry):
+    W = 800
+    H = 900
+    img = Image.new('RGB', (W, H), (11, 11, 11))
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([5,5,W-5,H-5], outline=(212,175,55), width=3)
+    font_big = ImageFont.load_default()
+    font_med = ImageFont.load_default()
+    col = (50,255,100) if side == "BUY" else (255,60,60)
+    draw.text((400
