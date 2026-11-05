@@ -1,4 +1,4 @@
-import os,io,time
+import os,io,time,threading
 from flask import Flask,request
 import telebot
 from PIL import Image,ImageDraw,ImageFont
@@ -7,6 +7,7 @@ import requests
 TOKEN="9241841874:AAELImqP5STFIImsLhZLfeyyo6traRdYSPA"
 bot=telebot.TeleBot(TOKEN)
 app=Flask(__name__)
+USERS=set()
 
 def get_klines():
  try:
@@ -17,32 +18,29 @@ def get_klines():
   return [4120,4122,4125,4128,4130,4128]*10
 
 def calc_rsi(prices):
- gains=0
- losses=0
+ g=0
+ l=0
  for i in range(1,15):
   d=prices[-i]-prices[-i-1]
-  if d>0:
-   gains+=d
-  else:
-   losses+=-d
- if losses==0:
-  return 75
- rs=gains/losses
+  if d>0: g+=d
+  else: l+=-d
+ if l==0: return 75
+ rs=g/l
  return 100-(100/(1+rs))
 
 def analyze():
- prices=get_klines()
- price=prices[-1]
- rsi=calc_rsi(prices)
- sig=None
+ pr=get_klines()
+ p=pr[-1]
+ r=calc_rsi(pr)
+ s=None
  rsn=""
- if rsi<38 and prices[-1]>prices[-2]:
-  sig="BUY"
-  rsn=f"RSI {round(rsi,1)} перепродан. Выкуп!"
- elif rsi>68 and prices[-1]<prices[-2]:
-  sig="SELL"
-  rsn=f"RSI {round(rsi,1)} перекуп. Шорт!"
- return sig,price,rsi,rsn
+ if r<38 and pr[-1]>pr[-2]:
+  s="BUY"
+  rsn=f"RSI {round(r,1)} перепродан. Сильный выкуп!"
+ elif r>68 and pr[-1]<pr[-2]:
+  s="SELL"
+  rsn=f"RSI {round(r,1)} перекуп. Разворот!"
+ return s,p,r,rsn
 
 def make_image(side,entry,rsi,reason):
  W=1080
@@ -78,18 +76,21 @@ def make_image(side,entry,rsi,reason):
 
 @bot.message_handler(commands=['start'])
 def start(m):
- bot.send_message(m.chat.id,"Sniper LIVE! /check /signal")
+ USERS.add(m.chat.id)
+ bot.send_message(m.chat.id,"Sniper LIVE 24/7! Я сам мониторю рынок каждые 3 мин и кину только топ точку! Команды: /check /signal")
 
 @bot.message_handler(commands=['signal','buy','sell'])
 def sig(m):
+ USERS.add(m.chat.id)
  s,p,r,rs=analyze()
  if not s:
   s="BUY"
-  rs="Тест. Ждем хорошую точку"
+  rs=f"Рынок {round(p,1)} RSI {round(r,1)}. Тест. Ждем точку"
  bot.send_photo(m.chat.id,make_image(s,p,r,rs),caption=rs)
 
 @bot.message_handler(commands=['check'])
 def chk(m):
+ USERS.add(m.chat.id)
  s,p,r,rs=analyze()
  if s:
   bot.send_message(m.chat.id,f"🔥 ЕСТЬ ТОЧКА! {s} {p} RSI {r}")
@@ -97,9 +98,24 @@ def chk(m):
  else:
   bot.send_message(m.chat.id,f"Пока нет точки. Цена {round(p,1)} RSI {round(r,1)}. Ждем выкуп!")
 
+def auto_loop():
+ while True:
+  try:
+   time.sleep(180)
+   s,p,r,rs=analyze()
+   if s and USERS:
+    for uid in list(USERS):
+     try:
+      bot.send_message(uid,f"🚨 АВТО СИГНАЛ! {s} {p} RSI {r}")
+      bot.send_photo(uid,make_image(s,p,r,rs))
+     except: pass
+  except: time.sleep(60)
+
+threading.Thread(target=auto_loop,daemon=True).start()
+
 @app.route('/')
 def home():
- return "SNIPER LIVE"
+ return "SNIPER AUTO LIVE"
 
 @app.route('/webhook',methods=['POST'])
 def wh():
