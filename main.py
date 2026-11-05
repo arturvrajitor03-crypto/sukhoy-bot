@@ -1,21 +1,23 @@
-import os, io, requests, random
+import os, io
 from flask import Flask, request
 import telebot
 from telebot.types import ReplyKeyboardRemove
 from PIL import Image, ImageDraw, ImageFont
 
 TOKEN = os.getenv("BOT_TOKEN")
-bot = telebot.TeleBot(TOKEN)
+if not TOKEN:
+    print("!!! NO BOT_TOKEN, using dummy to keep app alive")
+    TOKEN = "1234567890:AAH_dummy_token_for_render"
+
+try:
+    bot = telebot.TeleBot(TOKEN)
+except Exception as e:
+    print("Bot init failed:", e)
+    bot = telebot.TeleBot("1234567890:AAH_dummy_token_for_render")
+
 app = Flask(__name__)
 
-def get_price():
-    try:
-        r = requests.get("https://api.gold-api.com/price/XAU", timeout=5).json()
-        return round(float(r.get('price', 4128)), 2)
-    except:
-        return 4128.70
-
-def make_signal(price, direction):
+def make_signal():
     W, H = 1080, 1350
     img = Image.new("RGB", (W, H), (8, 8, 8))
     draw = ImageDraw.Draw(img)
@@ -23,12 +25,7 @@ def make_signal(price, direction):
     try:
         f1 = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 52)
         f2 = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 110)
-        f3 = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 56)
     except:
         f1 = ImageFont.load_default()
         f2 = ImageFont.load_default()
-        f3 = ImageFont.load_default()
-    if direction == "BUY":
-        color = (0, 255, 100)
-        sl = price - 8.5
-        tp
+    draw.text((W//2, 400), "SUHOY - XAUUSD", fill=(212,175,55), font=f1, anchor="
