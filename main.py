@@ -9,7 +9,6 @@ bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 CHAT_FILE = "/tmp/chats.json"
-SIGNAL_FILE = "/tmp/signals.json"
 last_prices = []
 last_signal = 0
 
@@ -24,20 +23,6 @@ def save_chats(chats):
     try:
         with open(CHAT_FILE, 'w') as f:
             json.dump(list(chats), f)
-    except:
-        pass
-
-def load_signals():
-    try:
-        with open(SIGNAL_FILE, 'r') as f:
-            return json.load(f)
-    except:
-        return []
-
-def save_signals(sigs):
-    try:
-        with open(SIGNAL_FILE, 'w') as f:
-            json.dump(sigs, f)
     except:
         pass
 
@@ -97,7 +82,7 @@ def make_signal(price, direction):
     bio = io.BytesIO()
     img.save(bio, format='JPEG', quality=98)
     bio.seek(0)
-    return bio, {"entry": price, "dir": direction, "tp1": tp1, "tp2": tp2, "tp3": tp3, "sl": sl, "hit": []}
+    return bio
 
 def auto_checker():
     global last_prices, last_signal, chat_ids
@@ -108,48 +93,6 @@ def auto_checker():
             last_prices.append(price)
             if len(last_prices) > 20:
                 last_prices.pop(0)
-            signals = load_signals()
-            new_signals = []
-            for sig in signals:
-                hit = sig.get("hit", [])
-                msg = None
-                if sig["dir"] == "BUY":
-                    if price >= sig["tp1"] and "tp1" not in hit:
-                        hit.append("tp1")
-                        msg = "GAlochka TP1 proiden! BUY " + str(sig["entry"]) + " -> " + str(sig["tp1"]) + " Cena " + str(price)
-                    elif price >= sig["tp2"] and "tp2" not in hit:
-                        hit.append("tp2")
-                        msg = "GAlochka TP2 proiden! BUY " + str(sig["entry"]) + " -> " + str(sig["tp2"]) + " Cena " + str(price)
-                    elif price >= sig["tp3"] and "tp3" not in hit:
-                        hit.append("tp3")
-                        msg = "GAlochka TP3 proiden! BUY " + str(sig["entry"]) + " -> " + str(sig["tp3"]) + " Cena " + str(price)
-                    if price <= sig["sl"] and "sl" not in hit:
-                        hit.append("sl")
-                        msg = "Stop Loss " + str(sig["entry"])
-                else:
-                    if price <= sig["tp1"] and "tp1" not in hit:
-                        hit.append("tp1")
-                        msg = "GAlochka TP1 proiden! SELL " + str(sig["entry"]) + " -> " + str(sig["tp1"]) + " Cena " + str(price)
-                    elif price <= sig["tp2"] and "tp2" not in hit:
-                        hit.append("tp2")
-                        msg = "GAlochka TP2 proiden! SELL " + str(sig["entry"]) + " -> " + str(sig["tp2"]) + " Cena " + str(price)
-                    elif price <= sig["tp3"] and "tp3" not in hit:
-                        hit.append("tp3")
-                        msg = "GAlochka TP3 proiden! SELL " + str(sig["entry"]) + " -> " + str(sig["tp3"]) + " Cena " + str(price)
-                    if price >= sig["sl"] and "sl" not in hit:
-                        hit.append("sl")
-                        msg = "Stop Loss " + str(sig["entry"])
-                if msg:
-                    chat_ids = load_chats()
-                    for cid in list(chat_ids):
-                        try:
-                            bot.send_message(cid, msg)
-                        except:
-                            pass
-                sig["hit"] = hit
-                if len(hit) < 3 and "sl" not in hit:
-                    new_signals.append(sig)
-            save_signals(new_signals)
             if len(last_prices) >= 10:
                 avg = sum(last_prices[:-1]) / (len(last_prices)-1)
                 diff = price - avg
@@ -160,10 +103,52 @@ def auto_checker():
                     signal = "SELL"
                 chat_ids = load_chats()
                 if signal and (time.time() - last_signal > 900) and chat_ids:
-                    img, sig_data = make_signal(price, signal)
-                    signals = load_signals()
-                    signals.append(sig_data)
-                    save_signals(signals)
+                    img = make_signal(price, signal)
                     for cid in list(chat_ids):
                         try:
-                            bot.send_photo(cid, img, caption="Vxod " + signal + " " + str
+                            bot.send_photo(cid, img)
+                        except:
+                            pass
+                    last_signal = time.time()
+            time.sleep(90)
+        except:
+            time.sleep(60)
+
+try:
+    threading.Thread(target=auto_checker, daemon=True).start()
+except:
+    pass
+
+@bot.message_handler(commands=['start'])
+def s(m):
+    chat_ids.add(m.chat.id)
+    save_chats(chat_ids)
+    bot.send_message(m.chat.id, "Avto vhod vkluchen! Signal tolko kogda est tochka!", reply_markup=ReplyKeyboardRemove())
+
+@bot.message_handler(commands=['signal','buy','sell','dry','remove'])
+def cmd(m):
+    chat_ids.add(m.chat.id)
+    save_chats(chat_ids)
+    price = get_price()
+    d = "BUY"
+    if m.text and "sell" in m.text.lower():
+        d = "SELL"
+    if m.text and "buy" in m.text.lower():
+        d = "BUY"
+    if m.text and "dry" not in m.text.lower() and "sell" not in m.text.lower() and "buy" not in m.text.lower():
+        d = random.choice(["BUY", "SELL"])
+    img = make_signal(price, d)
+    bot.send_photo(m.chat.id, img)
+
+@app.route('/')
+def h():
+    return "SUHOY LIVE",200
+
+@app.route('/webhook', methods=['POST'])
+def wh():
+    u = telebot.types.Update.de_json(request.stream.read().decode('utf-8'))
+    bot.process_new_updates([u])
+    return 'ok',200
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
