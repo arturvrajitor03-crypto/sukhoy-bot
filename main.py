@@ -1,100 +1,104 @@
-import os, io, random
+import os, io, random, threading, time
 from flask import Flask, request
 import telebot
 from PIL import Image, ImageDraw, ImageFont
 import requests
 
-TOKEN = "9241841874:AAELImqP5STFIImsLhZLfeyyo6traRdYSPA"
+TOKEN = "СЮДА_ВСТАВЬ_НОВЫЙ_ТОКЕН_ИЗ_BOTFATHER"
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-def get_price():
-    try:
-        r = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT", timeout=5).json()
-        return float(r['price'])
-    except:
-        return 4128.7
+# Храним чаты кто нажал /start
+CHATS = set()
 
-def make_signal_image(side="BUY", entry=4128.7):
-    W, H = 800, 1000
-    img = Image.new('RGB', (W, H), (11, 11, 11))
-    draw = ImageDraw.Draw(img)
-    
-    # Золотая рамка
+def get_data():
+    try:
+        # Берем свечи золота за 1 час
+        url = "https://api.binance.com/api/v3/klines?symbol=PAXGUSDT&interval=15m&limit=100"
+        klines = requests.get(url, timeout=10).json()
+        closes = [float(k[4]) for k in klines]
+        price = closes[-1]
+        
+        # Считаем EMA 50 и RSI
+        ema50 = sum(closes[-50:]) / 50
+        # RSI простой
+        gains = [max(0, closes[i]-closes[i-1]) for i in range(1,len(closes))]
+        losses = [max(0, closes[i-1]-closes[i]) for i in range(1,len(closes))]
+        avg_gain = sum(gains[-14:])/14
+        avg_loss = sum(losses[-14:])/14
+        rsi = 100 - (100/(1+avg_gain/(avg_loss+0.0001)))
+        
+        return price, ema50, rsi, closes
+    except Exception as e:
+        print("ERR data", e)
+        return 4128.7, 4128.0, 50, [4128.7]*100
+
+def make_image(side, entry, sl, tp1, tp2, tp3, rsi, conf_text="HIGH"):
+    W,H=800,1100
+    img=Image.new('RGB',(W,H),(11,11,11))
+    draw=ImageDraw.Draw(img)
     draw.rectangle([5,5,W-5,H-5], outline=(212,175,55), width=3)
-    draw.rectangle([15,15,W-15,H-15], outline=(212,175,55), width=1)
-
-    # Заголовок
     try:
-        font_big = ImageFont.truetype("DejaVuSans-Bold.ttf", 55)
-        font_med = ImageFont.truetype("DejaVuSans-Bold.ttf", 36)
-        font_small = ImageFont.truetype("DejaVuSans.ttf", 30)
+        fb=ImageFont.truetype("DejaVuSans-Bold.ttf",52)
+        fm=ImageFont.truetype("DejaVuSans-Bold.ttf",34)
+        fs=ImageFont.truetype("DejaVuSans.ttf",28)
     except:
-        font_big = ImageFont.load_default()
-        font_med = ImageFont.load_default()
-        font_small = ImageFont.load_default()
-
-    # Бык
-    draw.text((W//2, 90), "🐂", font=font_big, anchor="mm", fill=(212,175,55))
-    draw.text((W//2, 160), f"{side} XAUUSD", font=font_big, anchor="mm", fill=(212,175,55) if side=="BUY" else (255,70,70))
+        fb=fm=fs=ImageFont.load_default()
     
-    price = entry
-    sl = price - 12 if side=="BUY" else price + 12
-    tp1 = price + 8 if side=="BUY" else price - 8
-    tp2 = price + 16 if side=="BUY" else price - 16
-    tp3 = price + 28 if side=="BUY" else price - 28
+    color = (50,255,100) if side=="BUY" else (255,60,60)
+    draw.text((W//2,80), "🐂 SUHOY GOLD", font=fb, anchor="mm", fill=(212,175,55))
+    draw.text((W//2,150), f"{'✅ ' if conf_text=='HIGH' else ''}{side} XAUUSD", font=fb, anchor="mm", fill=color)
+    draw.text((W//2,205), f"Confidence: {conf_text} | RSI: {rsi:.0f}", font=fs, anchor="mm", fill=(180,180,180))
 
-    y = 240
-    def line(label, val, color=(255,255,255)):
+    y=260
+    def line(lbl,val,col=(255,255,255)):
         nonlocal y
-        draw.text((60, y), label, font=font_med, fill=(160,160,160))
-        draw.text((W-60, y), f"{val:.1f}", font=font_med, anchor="rm", fill=color)
-        y+=70
-
-    line("ENTRY:", price, (255,255,255))
-    line("SL:", sl, (255,80,80))
-    y+=20
-    line("TP1:", tp1, (50,255,100))
-    line("TP2:", tp2, (50,255,100))
-    line("TP3:", tp3, (50,255,100))
-
-    # Линия графика фальш
-    y+=60
-    draw.line([(60,y),(W-60,y+120),(W//2,y+60),(W-60,y+180)], fill=(212,175,55), width=4)
+        draw.text((60,y), lbl, font=fm, fill=(150,150,150))
+        draw.text((W-60,y), f"{val:.1f}", font=fm, anchor="rm", fill=col)
+        y+=65
     
-    y+=250
-    draw.text((W//2, y), "SUHOY GOLD SIGNALS", font=font_small, anchor="mm", fill=(212,175,55))
+    line("ENTRY:", entry, (255,255,255))
+    line("STOP LOSS:", sl, (255,70,70))
+    y+=15
+    line("TP1:", tp1, (50,255,130))
+    line("TP2:", tp2, (50,255,130))
+    line("TP3:", tp3, (50,255,130))
+    
+    # Мини-график из реальных цен
+    y+=50
+    closes = get_data()[3][-30:]
+    mn, mx = min(closes), max(closes)
+    pts=[]
+    for i,c in enumerate(closes):
+        x = 60 + i*(W-120)/29
+        yy = y+20 + (mx-c)/(mx-mn+0.001)*120
+        pts.append((x,yy))
+    draw.line(pts, fill=(212,175,55), width=3)
 
-    bio = io.BytesIO()
-    img.save(bio, 'PNG')
+    draw.text((W//2,H-40), "SUHOY AUTO SIGNALS • NOT FINANCIAL ADVICE", font=fs, anchor="mm", fill=(212,175,55))
+    bio=io.BytesIO()
+    img.save(bio,'PNG')
     bio.seek(0)
-    return bio, price, sl, tp1, tp2, tp3
+    return bio
 
-@bot.message_handler(commands=['start'])
-def start(m):
-    bot.send_message(m.chat.id, "Bot LIVE! Pishi /signal\n\nCommands:\n/signal - Gold signal\n/buy - Buy\n/sell - Sell")
-
-@bot.message_handler(commands=['signal','buy','sell'])
-def signal(m):
-    cmd = m.text.replace('/','').lower()
-    side = "BUY" if cmd in ['signal','buy'] else "SELL"
-    if cmd=="signal":
-        side = random.choice(["BUY","SELL"])
+def check_signal():
+    price, ema50, rsi, closes = get_data()
     
-    entry = get_price()
-    img_bio, price, sl, tp1, tp2, tp3 = make_signal_image(side, entry)
+    side=None
+    # ЛОГИКА ВХОДА - САМАЯ НАДЕЖНАЯ ДЛЯ ЗОЛОТА
+    # BUY: цена выше EMA50 и RSI 30-55 (откат)
+    if price > ema50 and 32 < rsi < 58 and closes[-1] > closes[-2]:
+        side="BUY"
+    # SELL: цена ниже EMA50 и RSI 42-68
+    elif price < ema50 and 42 < rsi < 68 and closes[-1] < closes[-2]:
+        side="SELL"
     
-    caption = f"{side} XAUUSD {price:.1f}\n\nENTRY: {price:.1f}\nSL: {sl:.1f}\n\nTP1: {tp1:.1f}\nTP2: {tp2:.1f}\nTP3: {tp3:.1f}"
-    bot.send_photo(m.chat.id, img_bio, caption=caption)
-
-@app.route('/', methods=['GET'])
-def home():
-    return "SUHOY LIVE GOLD"
-
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    bot.process_new_updates([telebot.types.Update.de_json(request.stream.read().decode("utf-8"))])
-    return "ok", 200
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
+    if side:
+        sl = price - 14 if side=="BUY" else price + 14
+        tp1 = price + 9 if side=="BUY" else price - 9
+        tp2 = price + 18 if side=="BUY" else price - 18
+        tp3 = price + 30 if side=="BUY" else price - 30
+        conf = "HIGH ✅" if (rsi<45 or rsi>55) else "MEDIUM"
+        
+        img = make_image(side, price, sl, tp1, tp2, tp3, rsi, conf)
+        cap = f"🚨 AUTO SIGNAL FOUND!\n\n{side} XAUUSD {price:.1f}\
