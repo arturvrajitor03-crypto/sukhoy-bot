@@ -1,4 +1,4 @@
-import os, threading, time, requests, telebot
+import os, threading, time, requests, telebot, json
 from flask import Flask
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
@@ -6,80 +6,122 @@ from PIL import Image, ImageDraw, ImageFont
 TOKEN = os.environ.get("BOT_TOKEN", "9241841874:AAELImqP5STFIImsLhZLfeyyo6traRdYSPA")
 bot = telebot.TeleBot(TOKEN, threaded=False)
 app = Flask(__name__)
+ACTIVE_FILE = "/tmp/active_signal.json"
 
 @app.route('/')
-def home():
-    return "SUHOY GOLD SNIPER V3 LIVE 24/7"
+def home(): return "SUHOY SNIPER TP TRACKER LIVE"
 
 def get_price():
-    try:
-        r = requests.get("https://api.gold-api.com/price/XAU", timeout=6).json()
-        return float(r['price'])
-    except:
-        try:
-            r = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT", timeout=6).json()
-            return float(r['price'])
-        except:
-            return 4131.29
+    try: return float(requests.get("https://api.gold-api.com/price/XAU", timeout=6).json()['price'])
+    except: return 4130.50
 
-def make_signal_image(price, rsi, side="SELL"):
+def save_signal(data):
     try:
-        # Пытаемся открыть твой красивый шаблон
-        base = Image.open("template.jpg").convert("RGB")
-        base = base.resize((800, 450))
-    except:
-        base = Image.new('RGB', (800, 450), color=(15,15,15))
-    
-    draw = ImageDraw.Draw(base)
-    # Делаем полупрозрачный фон для текста
-    try:
-        font_big = ImageFont.truetype("arial.ttf", 32)
-        font_mid = ImageFont.truetype("arial.ttf", 22)
-        font_small = ImageFont.truetype("arial.ttf", 18)
-    except:
-        font_big = ImageFont.load_default()
-        font_mid = ImageFont.load_default()
-        font_small = ImageFont.load_default()
+        with open(ACTIVE_FILE, 'w') as f: json.dump(data, f)
+    except: pass
 
-    # Золотой верх как у тебя был
-    draw.rectangle([0, 0, 800, 55], fill=(201, 169, 55))
-    draw.text((20, 12), f"SUHOY GOLD SNIPER V3 | {side}", fill=(0,0,0), font=font_mid)
+def load_signal():
+    try:
+        with open(ACTIVE_FILE, 'r') as f: return json.load(f)
+    except: return None
+
+def make_image_with_checks(price_now, signal):
+    # signal = {entry, sl, tp1,tp2,tp3, side, rsi, hits: [tp1_hit, tp2_hit...]}
+    W, H = 1280, 800
+    img = Image.new('RGB', (W, H), color=(10,10,10))
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([0,0,W,H], outline=(201,169,55), width=10)
     
-    # Данные
-    draw.text((20, 80), f"{side} {price:.1f}", fill=(255,60,60), font=font_big)
-    draw.text((20, 125), f"RSI {rsi}", fill=(255,255,255), font=font_mid)
-    draw.text((20, 160), f"ENTRY {price:.1f}", fill=(220,220,220), font=font_mid)
-    draw.text((20, 190), f"SL {price+12:.1f} | TP {price-15:.1f} / {price-25:.1f}", fill=(100,255,100), font=font_small)
-    draw.text((20, 380), f"RSI6 {rsi} ПЕРЕКУП! Цена у верхней ленты Bollinger. Ждем вниз!", fill=(201,169,55), font=font_small)
+    try:
+        f_huge = ImageFont.truetype("arialbd.ttf", 100)
+        f_big = ImageFont.truetype("arialbd.ttf", 55)
+        f_mid = ImageFont.truetype("arial.ttf", 28)
+    except:
+        f_huge = f_big = f_mid = ImageFont.load_default()
+
+    entry = signal['entry']
+    sl = signal['sl']
+    tp1, tp2, tp3 = signal['tp1'], signal['tp2'], signal['tp3']
+    side = signal['side']
+    
+    # Проверяем какие TP пройдены СЕЙЧАС
+    hits = [False, False, False]
+    if side == "SELL":
+        if price_now <= tp1: hits[0]=True
+        if price_now <= tp2: hits[1]=True
+        if price_now <= tp3: hits[2]=True
+    else:
+        if price_now >= tp1: hits[0]=True
+        if price_now >= tp2: hits[1]=True
+        if price_now >= tp3: hits[2]=True
+
+    draw.text((W//2, 40), "GOLD • XAU/USD • SELL SIGNAL", fill=(201,169,55), font=f_mid, anchor="mt")
+    color = (255,30,30) if side=="SELL" else (30,255,90)
+    draw.text((W//2, 180), f"{side} {entry:.2f}", fill=color, font=f_huge, anchor="mm")
+
+    y = 350
+    draw.text((200, y), f"ENTRY\n{entry:.2f}\nRSI {signal['rsi']}", fill=(255,255,255), font=f_big, anchor="mm", align="center")
+    draw.text((W-200, y), f"STOP LOSS\n{sl:.0f}", fill=(255,255,255), font=f_big, anchor="mm", align="center")
+
+    # TP1 TP2 TP3 с галочками
+    y = 520
+    for i, (tp, hit) in enumerate([(tp1,hits[0]), (tp2,hits[1]), (tp3,hits[2])]):
+        yy = y + i*90
+        icon = "✅" if hit else "⏰"
+        status = "HIT" if hit else "PENDING"
+        col = (0,255,100) if hit else (201,169,55)
+        draw.text((200, yy), f"{icon} TP{i+1} {tp:.0f}", fill=col, font=f_big, anchor="lm")
+        draw.text((W-250, yy), status, fill=col, font=f_mid, anchor="lm")
 
     bio = BytesIO()
-    base.save(bio, 'JPEG', quality=95)
+    img.save(bio, 'JPEG', quality=95)
     bio.seek(0)
-    return bio
+    return bio, hits
 
-@bot.message_handler(commands=['start','check','signal','checksignal'])
+@bot.message_handler(commands=['start','check','signal'])
 def handle(m):
     price = get_price()
-    rsi = 78
     side = "SELL"
-    text = f"🔥 ЕСТЬ ТОЧКА! {side} Цена {price:.2f}\nRSI6 {rsi} ПЕРЕКУП! Цена у верхней ленты Bollinger. Ждем разворот вниз!"
-    bot.send_message(m.chat.id, text)
-    try:
-        img = make_signal_image(price, rsi, side)
-        bot.send_photo(m.chat.id, img)
-    except Exception as e:
-        print(e)
+    rsi = 78
+    entry = price
+    sl = entry + 12
+    tp1 = entry - 10
+    tp2 = entry - 20
+    tp3 = entry - 35
 
-def run_bot():
+    signal = {"entry":entry, "sl":sl, "tp1":tp1, "tp2":tp2, "tp3":tp3, "side":side, "rsi":rsi, "chat_id":m.chat.id}
+    save_signal(signal)
+
+    img, hits = make_image_with_checks(price, signal)
+    bot.send_message(m.chat.id, f"🔥 НОВЫЙ СИГНАЛ! {side} {entry:.2f}\nTP1 {tp1:.0f} TP2 {tp2:.0f} TP3 {tp3:.0f}\nБот будет сам ставить ✅ когда пройдет!")
+    bot.send_photo(m.chat.id, img)
+
+@bot.message_handler(commands=['status'])
+def status(m):
+    sig = load_signal()
+    if not sig:
+        bot.send_message(m.chat.id, "Нет активного сигнала. Напиши /check")
+        return
+    price = get_price()
+    img, hits = make_image_with_checks(price, sig)
+    txt = f"📊 Цена сейчас {price:.2f}\n"
+    txt += f"{'✅' if hits[0] else '⏰'} TP1 {sig['tp1']:.0f}\n"
+    txt += f"{'✅' if hits[1] else '⏰'} TP2 {sig['tp2']:.0f}\n"
+    txt += f"{'✅' if hits[2] else '⏰'} TP3 {sig['tp3']:.0f}\n"
+    if all(hits): txt += "\n🎉 ВСЕ ТР TP ВЗЯТЫ!!!"
+    bot.send_message(m.chat.id, txt)
+    bot.send_photo(m.chat.id, img)
+
+def auto_checker():
     while True:
+        time.sleep(60)
+        sig = load_signal()
+        if not sig: continue
+        price = get_price()
+        img, hits = make_image_with_checks(price, sig)
+        # Если только что взяло новый TP - отправляем апдейт
+        # Сохраняем hits чтобы не спамить
         try:
-            bot.delete_webhook(drop_pending_updates=True)
-            bot.infinity_polling(timeout=60, long_polling_timeout=60)
-        except Exception as e:
-            print(e)
-            time.sleep(5)
-
-threading.Thread(target=run_bot, daemon=True).start()
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
+            last_hits = sig.get('last_hits', [False,False,False])
+            if hits != last_hits:
+               
