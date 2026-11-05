@@ -1,53 +1,54 @@
-import requests, time, asyncio, os
-from telegram import Bot
-import pandas as pd
-import numpy as np
+import os, requests
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = None # будет взят из первого сообщения
 
 def get_real_gold():
-    # Берем реальное золото PAXG ~ XAUUSD
     try:
-        # Цена
-        r = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT", timeout=5).json()
+        r = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT", timeout=10).json()
         price = float(r['price'])
-        # История для RSI
-        klines = requests.get("https://api.binance.com/api/v3/klines?symbol=PAXGUSDT&interval=5m&limit=100", timeout=5).json()
+        klines = requests.get("https://api.binance.com/api/v3/klines?symbol=PAXGUSDT&interval=5m&limit=30", timeout=10).json()
         closes = [float(k[4]) for k in klines]
-        df = pd.DataFrame(closes, columns=['close'])
-        # RSI 14
-        delta = df['close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-        rs = gain / loss
-        rsi = 100 - (100 / (1 + rs))
-        rsi_last = float(rsi.iloc[-1])
-        rsi6 = float(rsi.iloc[-1]) # для простоты
-        return price, rsi_last, closes
+        gains = 0
+        losses = 0
+        for i in range(1, 15):
+            diff = closes[-i] - closes[-i-1]
+            if diff > 0:
+                gains += diff
+            else:
+                losses += abs(diff)
+        avg_gain = gains / 14
+        avg_loss = losses / 14
+        if avg_loss == 0:
+            rsi = 100.0
+        else:
+            rs = avg_gain / avg_loss
+            rsi = 100 - (100 / (1 + rs))
+        return price, rsi
     except Exception as e:
-        print("Ошибка цены:", e)
-        return None, None, None
+        print("ERR:", e)
+        return None, None
 
-async def check_and_send(bot):
-    price, rsi, closes = get_real_gold()
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🇷🇺 СУХОЙ V5 РЕАЛЬНЫЙ - ГОТОВ! Напиши /check")
+
+async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    price, rsi = get_real_gold()
     if price is None:
-        return "Ошибка Binance, пробую..."
-    # Логика V5 РЕАЛЬНАЯ
+        await update.message.reply_text("Ошибка Binance, еще раз /check")
+        return
     if rsi < 30:
-        signal = f"🔴 ПЕРЕПРОДАН! RSI {rsi:.2f}\nЦена {price:.2f}\n✅ СИГНАЛ: ЖДИ ПОКУПКУ! Разворот скоро! Сила 95%"
-        trend = "СИЛЬНЫЙ ПАДЕНИЕ как на твоем скрине!"
-    elif rsi > 70:
-        signal = f"🟢 ПЕРЕКУПЛЕН! RSI {rsi:.2f}\nЦена {price:.2f}\n✅ СИГНАЛ: ЖДИ ПРОДАЖУ! Сила 95%"
-        trend = "СИЛЬНЫЙ РОСТ"
+        txt = f"🔴 ПЕРЕПРОДАН! RSI {rsi:.1f}\nЦена {price:.2f}\n✅ ПОКУПКА 95%!"
     elif rsi < 45:
-        signal = f"📉 ПАДЕНИЕ RSI {rsi:.2f} Цена {price:.2f}\nСила 88% ПРОДАЖА - как сейчас 4102!"
-        trend = "ПАДАЮЩИЙ ТРЕНД"
+        txt = f"📉 ПАДЕНИЕ RSI {rsi:.1f} Цена {price:.2f}\nПРОДАЖА 88%"
+    elif rsi > 70:
+        txt = f"🟢 ПЕРЕКУПЛЕН RSI {rsi:.1f} Цена {price:.2f}\nПРОДАЖА 95%!"
     else:
-        signal = f"⏸️ БОКОВИК RSI {rsi:.2f} Цена {price:.2f} Сила 60%"
-        trend = "Боковик"
-    
-    text = f"🇷🇺 СУХОЙ V5 РЕАЛЬНЫЙ\n{signal}\nТренд: {trend}\nИсточник: Binance PAXG = Золото"
-    return text
+        txt = f"⏸️ БОКОВИК RSI {rsi:.1f} Цена {price:.2f}"
+    await update.message.reply_text(f"V5 РЕАЛЬНЫЙ:\n{txt}")
 
-# Твой старый код polling оставь, только замени функцию /check на эту
+app = Application.builder().token(BOT_TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("check", check))
+app.run_polling()
