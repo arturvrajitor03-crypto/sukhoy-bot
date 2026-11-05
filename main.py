@@ -108,8 +108,6 @@ def auto_checker():
             last_prices.append(price)
             if len(last_prices) > 20:
                 last_prices.pop(0)
-
-            # 1. Проверка активных сигналов на ТП
             signals = load_signals()
             new_signals = []
             for sig in signals:
@@ -118,20 +116,102 @@ def auto_checker():
                 if sig["dir"] == "BUY":
                     if price >= sig["tp1"] and "tp1" not in hit:
                         hit.append("tp1")
-                        msg = f"✅ TP1 ПРОЙДЕН! BUY {sig['entry']} -> {sig['tp1']} (+8$)\nТекущая цена: {price}"
+                        msg = "TP1 PASSED BUY " + str(sig["entry"]) + " -> " + str(sig["tp1"]) + " price " + str(price)
                     elif price >= sig["tp2"] and "tp2" not in hit:
                         hit.append("tp2")
-                        msg = f"✅✅ TP2 ПРОЙДЕН! BUY {sig['entry']} -> {sig['tp2']} (+16$)\nЦена: {price}"
+                        msg = "TP2 PASSED BUY " + str(sig["entry"]) + " -> " + str(sig["tp2"]) + " price " + str(price)
                     elif price >= sig["tp3"] and "tp3" not in hit:
                         hit.append("tp3")
-                        msg = f"✅✅✅ TP3 ПРОЙДЕН! BUY {sig['entry']} -> {sig['tp3']} (+28$) 🔥\nЦена: {price}"
+                        msg = "TP3 PASSED BUY " + str(sig["entry"]) + " -> " + str(sig["tp3"]) + " price " + str(price)
                     if price <= sig["sl"] and "sl" not in hit:
                         hit.append("sl")
-                        msg = f"❌ SL {sig['entry']} -> {sig['sl']}"
+                        msg = "SL HIT " + str(sig["entry"])
                 else:
                     if price <= sig["tp1"] and "tp1" not in hit:
                         hit.append("tp1")
-                        msg = f"✅ TP1 ПРОЙДЕН! SELL {sig['entry']} -> {sig['tp1']} (+8$)\nЦена: {price}"
+                        msg = "TP1 PASSED SELL " + str(sig["entry"]) + " -> " + str(sig["tp1"]) + " price " + str(price)
                     elif price <= sig["tp2"] and "tp2" not in hit:
                         hit.append("tp2")
-                        msg = f"✅✅ TP2 ПРОЙДЕН! SELL {sig['entry']} -> {sig['tp2
+                        msg = "TP2 PASSED SELL " + str(sig["entry"]) + " -> " + str(sig["tp2"]) + " price " + str(price)
+                    elif price <= sig["tp3"] and "tp3" not in hit:
+                        hit.append("tp3")
+                        msg = "TP3 PASSED SELL " + str(sig["entry"]) + " -> " + str(sig["tp3"]) + " price " + str(price)
+                    if price >= sig["sl"] and "sl" not in hit:
+                        hit.append("sl")
+                        msg = "SL HIT " + str(sig["entry"])
+                if msg:
+                    chat_ids = load_chats()
+                    for cid in list(chat_ids):
+                        try:
+                            bot.send_message(cid, msg)
+                        except:
+                            pass
+                sig["hit"] = hit
+                if len(hit) < 3 and "sl" not in hit:
+                    new_signals.append(sig)
+            save_signals(new_signals)
+            if len(last_prices) >= 10:
+                avg = sum(last_prices[:-1]) / (len(last_prices)-1)
+                diff = price - avg
+                signal = None
+                if diff < -3.0:
+                    signal = "BUY"
+                elif diff > 3.0:
+                    signal = "SELL"
+                chat_ids = load_chats()
+                if signal and (time.time() - last_signal > 900) and chat_ids:
+                    img, sig_data = make_signal(price, signal)
+                    signals = load_signals()
+                    signals.append(sig_data)
+                    save_signals(signals)
+                    for cid in list(chat_ids):
+                        try:
+                            bot.send_photo(cid, img, caption="VHOd " + signal + " " + str(price))
+                        except:
+                            pass
+                    last_signal = time.time()
+            time.sleep(60)
+        except:
+            time.sleep(60)
+
+try:
+    threading.Thread(target=auto_checker, daemon=True).start()
+except:
+    pass
+
+@bot.message_handler(commands=['start'])
+def s(m):
+    chat_ids.add(m.chat.id)
+    save_chats(chat_ids)
+    bot.send_message(m.chat.id, "Auto vkluchen! Budu stavit galochki kogda TP proydet!", reply_markup=ReplyKeyboardRemove())
+
+@bot.message_handler(commands=['signal','buy','sell','dry','remove'])
+def cmd(m):
+    chat_ids.add(m.chat.id)
+    save_chats(chat_ids)
+    price = get_price()
+    d = "BUY"
+    if m.text and "sell" in m.text.lower():
+        d = "SELL"
+    elif m.text and "buy" in m.text.lower():
+        d = "BUY"
+    else:
+        d = random.choice(["BUY", "SELL"])
+    img, sig_data = make_signal(price, d)
+    signals = load_signals()
+    signals.append(sig_data)
+    save_signals(signals)
+    bot.send_photo(m.chat.id, img, caption="Signal " + d + " - sleju za TP!")
+
+@app.route('/')
+def h():
+    return "SUHOY TP CHECK LIVE",200
+
+@app.route('/webhook', methods=['POST'])
+def wh():
+    u = telebot.types.Update.de_json(request.stream.read().decode('utf-8'))
+    bot.process_new_updates([u])
+    return 'ok',200
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
