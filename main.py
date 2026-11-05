@@ -1,4 +1,8 @@
-import os, time, requests, threading
+import os
+import time
+import requests
+import threading
+import datetime
 
 def fake_web():
     from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -7,8 +11,9 @@ def fake_web():
         def do_GET(self):
             self.send_response(200)
             self.end_headers()
-            self.wfile.write(b"V17.4 RU LIVE")
+            self.wfile.write(b"V17.5 RU LIVE")
     HTTPServer(("0.0.0.0", port), H).serve_forever()
+
 threading.Thread(target=fake_web, daemon=True).start()
 
 TOKEN = os.getenv("BOT_TOKEN", "")
@@ -20,7 +25,8 @@ LAST_PRICE = 4093.0
 
 def send(cid, text):
     try:
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id": cid, "text": text}, timeout=15)
+        url = "https://api.telegram.org/bot{}/sendMessage".format(TOKEN)
+        requests.post(url, data={"chat_id": cid, "text": text}, timeout=15)
     except:
         pass
 
@@ -31,28 +37,30 @@ def get_gold():
         LAST_PRICE = float(r["price"])
     except:
         pass
-    import datetime
     minute = datetime.datetime.now().minute
     rsi = 35 + (minute % 30)
-    sig = "BUY" if rsi < 40 else "SELL" if rsi > 60 else "BOKOVIK"
+    if rsi < 40:
+        sig = "BUY"
+    elif rsi > 60:
+        sig = "SELL"
+    else:
+        sig = "BOKOVIK"
     return LAST_PRICE, rsi, sig
 
 def calc_lot(bal):
     risk = bal * 0.02
     lot = risk / 15.0
-    return (round(lot,2), risk) if lot >= 0.01 else (0.01, risk)
+    if lot < 0.01:
+        lot = 0.01
+    return round(lot, 2), risk
 
 def auto_loop():
     global BALANCE, CURRENT_POS
     while True:
         try:
             price, rsi, sig = get_gold()
-            if sig in ["BUY","SELL"] and CURRENT_POS is None:
-                lot, risk = calc_lot(BALANCE)
-                CURRENT_POS = {"type": sig, "entry": price, "lot": lot}
-                for cid in list(CHATS):
-                    send(cid, f"AUTO {sig} Цена {price:.2f} RSI {rsi} Лот {lot} Риск {risk:.0f}$")
-            time.sleep(180)
-        except:
-            time.sleep(60)
-threading.Thread(target=auto_loop, daemon=True).
+            if sig in ["BUY", "SELL"]:
+                if CURRENT_POS is None:
+                    lot, risk = calc_lot(BALANCE)
+                    CURRENT_POS = {"type": sig, "entry": price, "lot": lot}
+                    msg = "AUTO {} Cena {:.2f} RSI {} Lot {} Risk {:.0f}$".format(sig
