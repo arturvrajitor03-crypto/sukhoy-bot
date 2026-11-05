@@ -1,28 +1,37 @@
 import os
-import io
 from flask import Flask, request
 import telebot
 from telebot.types import ReplyKeyboardRemove
-from PIL import Image, ImageDraw, ImageFont
 
 TOKEN = os.getenv('BOT_TOKEN')
 if not TOKEN:
-    TOKEN = '123456:TEST'
+    TOKEN = '123456:TEST_DUMMY'
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-def make_img():
-    W = 1080
-    H = 1350
-    img = Image.new('RGB', (W, H), (8, 8, 8))
-    draw = ImageDraw.Draw(img)
-    draw.rectangle([12, 12, W-12, H-12], outline=(212, 175, 55), width=8)
+@bot.message_handler(commands=['start'])
+def start(m):
+    bot.send_message(m.chat.id, 'Avto vhod vkluchen! Bot LIVE! Pishi /signal', reply_markup=ReplyKeyboardRemove())
+
+@bot.message_handler(commands=['signal','buy','sell'])
+def sig(m):
+    bot.send_message(m.chat.id, 'SUHOY XAUUSD BUY 4128 SL 4120 TP 4136 - eto test, seychas dobavim kartinku')
+
+@app.route('/')
+def home():
+    return 'SUHOY LIVE', 200
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
     try:
-        f1 = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 50)
-        f2 = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', 100)
+        data = request.data.decode('utf-8')
+        update = telebot.types.Update.de_json(data)
+        bot.process_new_updates([update])
     except:
-        f1 = ImageFont.load_default()
-        f2 = ImageFont.load_default()
-    draw.text((300, 300), 'SUHOY XAUUSD', fill=(212, 175, 55), font=f1)
-    draw.text((400, 600),
+        pass
+    return 'ok', 200
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', '10000'))
+    app.run(host='0.0.0.0', port=port)
