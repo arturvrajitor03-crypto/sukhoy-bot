@@ -12,7 +12,7 @@ auto_chats = set()
 
 @app.route('/')
 def home():
-    return "SUHOY NEW SNIPER V2 FIXED"
+    return "SUHOY SNIPER FIXED NO EMOJI"
 
 def get_price():
     try:
@@ -23,8 +23,8 @@ def get_price():
 
 def get_market_data(price):
     rsi = random.randint(18, 87)
-    macd = random.choice(["бычий", "медвежий"])
-    bb = random.choice(["верхняя", "нижняя", "середина"])
+    macd = random.choice(["bull", "bear"])
+    bb = random.choice(["upper", "lower", "middle"])
     vol = random.randint(8, 22)
     strength = random.randint(60, 95)
     is_news = random.choice([False, False, False, True])
@@ -33,4 +33,17 @@ def get_market_data(price):
 def new_sniper_logic(price):
     d = get_market_data(price)
     if d["news"]:
-        return None, None, None, None, None, None, "⛔ НОВОСТИ! Снайпер ждет
+        return None, None, None, None, None, None, "NEWS! Sniper wait", d, False
+    if d["strength"] < 72:
+        msg = f"WAIT Strength {d['strength']}% RSI {d['rsi']} weak"
+        return None, None, None, None, None, None, msg, d, False
+    if d["rsi"] >= 70 and d["bb"] == "upper":
+        sl = price + d["vol"]
+        tp1 = price - 9
+        tp2 = price - 20
+        tp3 = price - 35
+        reason = f"SELL Strength {d['strength']}% RSI {d['rsi']} BB {d['bb']}"
+        return "SELL", price, sl, tp1, tp2, tp3, reason, d, True
+    if d["rsi"] <= 30 and d["bb"] == "lower":
+        sl = price - d["vol"]
+        tp1 = price + 
