@@ -13,92 +13,105 @@ def get_gold_price():
     except: pass
     return 4093
 
-def get_font(size):
-    try: return ImageFont.truetype("DejaVuSans-Bold.ttf", size)
-    except: return ImageFont.load_default()
+def get_font(size, bold=False):
+    try:
+        # пробуем найти шрифт с поддержкой кириллицы
+        names = ["DejaVuSans-Bold.ttf", "DejaVuSans.ttf", "arial.ttf"] if bold else ["DejaVuSans.ttf", "arial.ttf"]
+        for n in names:
+            try:
+                return ImageFont.truetype(n, size)
+            except: continue
+        # поиск в системе
+        return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", size)
+    except:
+        return ImageFont.load_default()
 
 def create_image(direction, entry, sl, tp1, tp2, tp3):
-    img = Image.new("RGB", (1000, 1400), (10,10,10))
+    # Используем твой шаблон если есть
+    if os.path.exists("template.jpg"):
+        img = Image.open("template.jpg").convert("RGB")
+        img = img.resize((1000, 1400))
+    else:
+        img = Image.new("RGB", (1000, 1400), (12, 12, 12))
+    
     draw = ImageDraw.Draw(img)
-    # золотая рамка
-    draw.rectangle([5,5,995,1395], outline=(212,175,55), width=8)
-    draw.rectangle([30,30,970,1370], outline=(212,175,55), width=2)
-    
-    font_big = get_font(70)
-    font_mid = get_font(42)
-    
-    # заголовок
-    draw.text((300, 50), "СУХОЙ - XAUUSD", fill=(212,175,55), font=font_big)
-    
-    # направление
-    color = (0,255,90) if direction=="BUY" else (255,30,30)
-    draw.rectangle([0, 180, 1000, 280], fill=(0,0,0))
-    draw.text((330, 200), f"XAUUSD - {direction}", fill=color, font=font_big)
-    
-    # бык по центру - рисуем круг
-    draw.ellipse([350, 350, 650, 650], fill=(212,175,55), outline=(255,215,0), width=5)
-    draw.text((440, 460), "🐂", fill=(0,0,0), font=ImageFont.truetype("DejaVuSans-Bold.ttf", 120) if os.path.exists("DejaVuSans-Bold.ttf") else get_font(120))
-    
-    # блок с данными
-    draw.rectangle([100, 800, 900, 1150], fill=(0,0,0))
-    draw.rectangle([100, 800, 900, 1150], outline=(212,175,55), width=2)
-    
-    lines = [f"Вход: {entry}", f"SL: {sl}", f"TP1: {tp1}  ⬜", f"TP2: {tp2}  ⬜", f"TP3: {tp3}  ⬜"]
-    y = 830
-    for line in lines:
-        bbox = draw.textbbox((0,0), line, font=font_mid)
-        w = bbox[2]-bbox[0]
-        draw.text(((1000-w)//2, y), line, fill=(255,235,180), font=font_mid)
-        y += 65
-    
-    path = f"/tmp/{random.randint(1,999999)}.jpg"
+    W, H = img.size
+
+    # Цвета
+    gold = (212, 175, 55)
+    green = (0, 200, 80)
+    red = (230, 60, 60)
+
+    # Текст сверху
+    font_title = get_font(58, True)
+    font_pair = get_font(52, True)
+    font_data = get_font(38, True)
+    font_small = get_font(34, True)
+
+    # Заголовок СУХОЙ - XAUUSD
+    draw.text((W//2, 90), "СУХОЙ - XAUUSD", font=font_title, fill=gold, anchor="mm")
+
+    # Направление BUY/SELL
+    col = green if direction == "BUY" else red
+    draw.text((W//2, 210), f"XAUUSD - {direction}", font=font_pair, fill=col, anchor="mm")
+
+    # Круг посередине - просто золотой круг без эмодзи
+    cx, cy = W//2, 500
+    draw.ellipse((cx-140, cy-140, cx+140, cy+140), fill=gold, outline=(255,215,100), width=4)
+    # Стрелка внутри кружка текстом
+    arrow = "BUY" if direction == "BUY" else "SELL"
+    font_arrow = get_font(70, True)
+    draw.text((cx, cy), arrow, font=font_arrow, fill=(0,0,0), anchor="mm")
+
+    # Прямоугольник с данными
+    y0 = 750
+    # рамка
+    draw.rectangle((80, y0, W-80, y0+320), outline=gold, width=2)
+    draw.text((W//2, y0+40), f"Вход: выше {entry}", font=font_data, fill=(240,230,180), anchor="mm")
+    draw.text((W//2, y0+90), f"SL: {sl}", font=font_data, fill=(240,230,180), anchor="mm")
+    draw.text((W//2, y0+140), f"TP1: {tp1}", font=font_data, fill=(240,230,180), anchor="mm")
+    draw.text((W//2, y0+190), f"TP2: {tp2}", font=font_data, fill=(240,230,180), anchor="mm")
+    draw.text((W//2, y0+240), f"TP3: {tp3}", font=font_data, fill=(240,230,180), anchor="mm")
+
+    # нижняя линия
+    draw.text((W//2, H-80), "t.me/твой_канал", font=font_small, fill=gold, anchor="mm")
+
+    path = "/tmp/signal.jpg"
     img.save(path, quality=95)
     return path
 
-def send_photo(chat_id, photo_path, caption):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
-    with open(photo_path, 'rb') as f:
-        requests.post(url, data={"chat_id": chat_id, "caption": caption}, files={"photo": f}, timeout=20)
+def send_signal(chat_id, direction):
+    price = get_gold_price()
+    entry = price + random.randint(2,5) if direction=="BUY" else price - random.randint(2,5)
+    sl = entry - 9 if direction=="BUY" else entry + 9
+    tp1, tp2, tp3 = entry+4, entry+8, entry+13
+    if direction=="SELL":
+        tp1, tp2, tp3 = entry-4, entry-8, entry-13
 
-def send_text(chat_id, text):
-    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": chat_id, "text": text}, timeout=10)
+    img_path = create_image(direction, entry, sl, tp1, tp2, tp3)
+    
+    text = f"👑 {direction} {entry}$\nTP1 {tp1}\nTP2 {tp2}\nTP3 {tp3}\nСлежу и ставлю ✅"
+    
+    with open(img_path, "rb") as f:
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendPhoto", data={"chat_id": chat_id, "caption": text}, files={"photo": f})
 
-def set_webhook():
-    time.sleep(3)
-    base = os.getenv("RENDER_EXTERNAL_URL")
-    if base:
-        requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={base}/webhook", timeout=10)
-
-threading.Thread(target=set_webhook, daemon=True).start()
-
-@app.route('/')
-def home(): return "SUHOY WITH IMAGE LIVE"
-
-@app.route('/webhook', methods=['POST'])
+@app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
-    try:
-        data = request.get_json(force=True)
+    data = request.get_json()
+    if "message" in data:
         chat_id = data["message"]["chat"]["id"]
-        text = data["message"]["text"].strip()
-        if text == "/start":
-            send_text(chat_id, "👑 СУХОЙ с картинками!\n/dry - сигнал")
-        elif text.startswith("/dry"):
-            price = get_gold_price()
-            if price >= 4050:
-                direction, sl = "BUY", price-9
-                tp1, tp2, tp3 = price+4, price+8, price+13
-                entry = f"выше {price}"
+        txt = data["message"].get("text","")
+        if txt in ["/start", "/dry"]:
+            if txt == "/start":
+                requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": chat_id, "text": "👑 СУХОЙ с картинками!\n/dry - сигнал"})
             else:
-                direction, sl = "SELL", price+9
-                tp1, tp2, tp3 = price-4, price-8, price-13
-                entry = f"ниже {price}"
-            
-            img_path = create_image(direction, entry, sl, tp1, tp2, tp3)
-            caption = f"👑 {direction} {price}$\nTP1 {tp1} ⬜\nTP2 {tp2} ⬜\nTP3 {tp3} ⬜\nСлежу и ставлю ✅"
-            send_photo(chat_id, img_path, caption)
-    except Exception as e:
-        print(e)
+                direction = random.choice(["BUY", "SELL"])
+                threading.Thread(target=send_signal, args=(chat_id, direction)).start()
     return "ok"
 
+@app.route("/")
+def home():
+    return "Bot alive"
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
