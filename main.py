@@ -1,4 +1,16 @@
+import threading
+from flask import Flask
 import os, requests, time
+
+# === ФИКС ДЛЯ RENDER - ОТКРЫВАЕМ ПОРТ ===
+app_flask = Flask(__name__)
+@app_flask.route('/')
+def home():
+    return "V8 ULTRA LIVE - Bot is running!"
+def run_flask():
+    app_flask.run(host='0.0.0.0', port=10000)
+threading.Thread(target=run_flask, daemon=True).start()
+# === КОНЕЦ ФИКСА ===
 
 TOKEN = os.getenv("BOT_TOKEN")
 AUTO = False
@@ -22,33 +34,25 @@ def get_signal():
         sl = price*0.998 if sig=="BUY" else price*1.002
         tp = price*1.005 if sig=="BUY" else price*0.995
         return price,rsi,sig,sl,tp
-    except:
+    except Exception as e:
+        print(f"Signal error: {e}")
         return None,None,"ERROR",0,0
 
 def send(chat_id, text):
-    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id": chat_id, "text": text})
+    try:
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id": chat_id, "text": text}, timeout=10)
+    except: pass
 
-print("V8 ULTRA STARTED")
+print("V8 ULTRA STARTED - Waiting for commands...")
 offset=0
 while True:
     try:
         updates = requests.get(f"https://api.telegram.org/bot{TOKEN}/getUpdates?offset={offset}&timeout=20", timeout=25).json()
         for u in updates.get("result", []):
             offset = u["update_id"]+1
+            if "message" not in u: continue
             chat_id = u["message"]["chat"]["id"]
             txt = u["message"].get("text","")
+            print(f"Got: {txt}")
             if txt=="/start":
-                send(chat_id, "🤖 V8 ULTRA LIVE!\n/check - сигнал GOLD\n/auto_on - авто\n/auto_off - выкл")
-            elif txt=="/check":
-                p,rsi,sig,sl,tp = get_signal()
-                if not p: send(chat_id, "Ошибка Binance")
-                else: send(chat_id, f"GOLD {p:.2f}\nRSI {rsi:.1f}\nSIGNAL {sig}\nSL {sl:.2f} TP {tp:.2f}\nAUTO {'ON' if AUTO else 'OFF'}")
-            elif txt=="/auto_on":
-                AUTO=True
-                send(chat_id, "✅ АВТО ВКЛ! Теперь пиши /check")
-            elif txt=="/auto_off":
-                AUTO=False
-                send(chat_id, "🛑 АВТО ВЫКЛ")
-    except Exception as e:
-        print(e)
-        time.sleep(5)
+                send(chat_id, "🤖 V8 ULTRA LIVE!\n\n/check - сигнал GOLD\n/auto_on -
