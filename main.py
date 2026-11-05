@@ -50,7 +50,7 @@ def make_signal(price, direction):
         tp3 = round(price - 28, 2)
 
     y = 250
-    draw.text((W//2, y), "SUHOY - XAUUSD", fill=(212,175,55), font=f1, anchor="mm")
+    draw.text((W//2, y), "TEST - XAUUSD", fill=(212,175,55), font=f1, anchor="mm")
     y += 180
     draw.text((W//2, y), direction, fill=color, font=f2, anchor="mm")
     y += 120
@@ -81,26 +81,28 @@ def auto_checker():
             if len(last_prices) > 20:
                 last_prices.pop(0)
             
-            if len(last_prices) >= 10:
+            if len(last_prices) >= 5:
                 avg = sum(last_prices[:-1]) / (len(last_prices)-1)
                 diff = price - avg
                 
                 signal = None
-                if diff < -3.5:
+                # ТЕСТ: достаточно движения 0.8$ вместо 3.5$
+                if diff < -0.8:
                     signal = "BUY"
-                elif diff > 3.5:
+                elif diff > 0.8:
                     signal = "SELL"
                 
-                if signal and (time.time() - last_signal > 1200) and chat_ids:
+                # ТЕСТ: шлем каждые 3 мин вместо 20
+                if signal and (time.time() - last_signal > 180) and chat_ids:
                     img = make_signal(price, signal)
                     for cid in list(chat_ids):
                         try:
-                            bot.send_photo(cid, img, caption=f"VHOd {signal} {price}")
+                            bot.send_photo(cid, img, caption=f"TEST VHOd {signal} {price} diff {diff:.1f}")
                         except:
                             pass
                     last_signal = time.time()
             
-            time.sleep(120)
+            time.sleep(60) # проверка каждую минуту
         except:
             time.sleep(60)
 
@@ -112,7 +114,12 @@ except:
 @bot.message_handler(commands=['start'])
 def s(m):
     chat_ids.add(m.chat.id)
-    bot.send_message(m.chat.id, "Auto vhod vkluchen! Budu slat kogda est tochka BUY/SELL", reply_markup=ReplyKeyboardRemove())
+    bot.send_message(m.chat.id, "TEST MODE vkluchen! Signal kajdye 3 min. Jdi 3-5 min.", reply_markup=ReplyKeyboardRemove())
+    # сразу шлем 1 сигнал для проверки
+    price = get_price()
+    d = random.choice(["BUY","SELL"])
+    img = make_signal(price, d)
+    bot.send_photo(m.chat.id, img, caption="TEST - pervy signal srazu")
 
 @bot.message_handler(commands=['signal','buy','sell','dry','remove'])
 def cmd(m):
@@ -131,7 +138,7 @@ def cmd(m):
 
 @app.route('/')
 def h():
-    return "ENTRY BOT LIVE",200
+    return "TEST MODE",200
 
 @app.route('/webhook', methods=['POST'])
 def wh():
