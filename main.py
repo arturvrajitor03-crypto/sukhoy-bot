@@ -1,9 +1,7 @@
-import os, requests
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+import os, requests, time
 
 TOKEN = os.getenv("BOT_TOKEN")
-AUTO = {"on": False}
+AUTO = False
 
 def get_signal():
     try:
@@ -16,9 +14,9 @@ def get_signal():
             d=closes[-i]-closes[-i-1]
             if d>0: g+=d
             else: l+=abs(d)
-        rsi = 100 if l==0 else 100-(100/(1+(g/14)/(l/14)))
+        rsi = 100 if l==0 else 100-(100/(1+(g/14)/(l/14 or 1)))
         ema = sum(closes[-20:])/20
-        sig = "WAIT"
+        sig="WAIT"
         if rsi<32 and price>ema: sig="BUY"
         elif rsi>68 and price<ema: sig="SELL"
         sl = price*0.998 if sig=="BUY" else price*1.002
@@ -27,27 +25,30 @@ def get_signal():
     except:
         return None,None,"ERROR",0,0
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🤖 V8 AUTO LIVE!\n/check - сигнал\n/auto_on - авто вкл\n/auto_off - авто выкл")
+def send(chat_id, text):
+    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id": chat_id, "text": text})
 
-async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    p,rsi,sig,sl,tp = get_signal()
-    if not p:
-        await update.message.reply_text("Ошибка, попробуй еще /check")
-        return
-    await update.message.reply_text(f"GOLD {p:.2f}\nRSI {rsi:.1f}\nSIGNAL {sig}\nSL {sl:.2f} TP {tp:.2f}\nAUTO {'ON' if AUTO['on'] else 'OFF'}")
-
-async def auto_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    AUTO["on"]=True
-    await update.message.reply_text("✅ АВТО ВКЛ! Пиши /check каждые 5 мин - буду давать сигналы!")
-
-async def auto_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    AUTO["on"]=False
-    await update.message.reply_text("🛑 АВТО ВЫКЛ")
-
-app = Application.builder().token(TOKEN).build()
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("check", check))
-app.add_handler(CommandHandler("auto_on", auto_on))
-app.add_handler(CommandHandler("auto_off", auto_off))
-app.run_polling()
+print("V8 ULTRA STARTED")
+offset=0
+while True:
+    try:
+        updates = requests.get(f"https://api.telegram.org/bot{TOKEN}/getUpdates?offset={offset}&timeout=20", timeout=25).json()
+        for u in updates.get("result", []):
+            offset = u["update_id"]+1
+            chat_id = u["message"]["chat"]["id"]
+            txt = u["message"].get("text","")
+            if txt=="/start":
+                send(chat_id, "🤖 V8 ULTRA LIVE!\n/check - сигнал GOLD\n/auto_on - авто\n/auto_off - выкл")
+            elif txt=="/check":
+                p,rsi,sig,sl,tp = get_signal()
+                if not p: send(chat_id, "Ошибка Binance")
+                else: send(chat_id, f"GOLD {p:.2f}\nRSI {rsi:.1f}\nSIGNAL {sig}\nSL {sl:.2f} TP {tp:.2f}\nAUTO {'ON' if AUTO else 'OFF'}")
+            elif txt=="/auto_on":
+                AUTO=True
+                send(chat_id, "✅ АВТО ВКЛ! Теперь пиши /check")
+            elif txt=="/auto_off":
+                AUTO=False
+                send(chat_id, "🛑 АВТО ВЫКЛ")
+    except Exception as e:
+        print(e)
+        time.sleep(5)
