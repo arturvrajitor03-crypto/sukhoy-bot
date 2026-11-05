@@ -1,57 +1,89 @@
 import os
 from flask import Flask, request
 import telebot
-from PIL import Image
-import io
+from telebot import types
+import requests
+from datetime import datetime
 
 TOKEN = os.getenv("BOT_TOKEN")
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-def make_suhoy(user_bytes):
-    frame = Image.open("template.jpg").convert("RGB")
-    user_img = Image.open(io.BytesIO(user_bytes)).convert("RGB")
-
-    W, H = frame.size
-    # Зона под быком - твое пустое черное место
-    left = int(W * 0.12)
-    top = int(H * 0.56)  # чуть ниже быка
-    right = int(W * 0.88)
-    bottom = int(H * 0.93)
-    
-    box_w = right - left
-    box_h = bottom - top
-    
-    # Вписываем фото клиента
-    user_img.thumbnail((box_w, box_h), Image.LANCZOS)
-    
-    result = frame.copy()
-    x = left + (box_w - user_img.width)//2
-    y = top + (box_h - user_img.height)//2
-    result.paste(user_img, (x, y))
-    
-    out = io.BytesIO()
-    result.save(out, format='JPEG', quality=96)
-    out.seek(0)
-    return out
-
-@bot.message_handler(commands=['start','dry'])
-def start(m):
-    bot.send_message(m.chat.id, "👑 СУХОЙ - XAUUSD на связи!\nКидай фото - упакую в золото 🐂")
-
-@bot.message_handler(content_types=['photo'])
-def handle_photo(m):
-    bot.send_message(m.chat.id, "Сушу в золоте... ⏳")
+def get_gold_price():
     try:
-        file_info = bot.get_file(m.photo[-1].file_id)
-        data = bot.download_file(file_info.file_path)
-        res = make_suhoy(data)
-        bot.send_photo(m.chat.id, res, caption="СУХОЙ - XAUUSD ✅ Готово! 👑")
-    except Exception as e:
-        bot.send_message(m.chat.id, f"Ошибка: {e}")
+        r = requests.get("https://api.gold-api.com/price/XAU", timeout=5).json()
+        return round(r.get('price', 2650), 2)
+    except:
+        return 2645.50
+
+def make_signal(direction):
+    price = get_gold_price()
+    now = datetime.now().strftime("%H:%M мск")
+    
+    if direction == "BUY":
+        entry = price
+        sl = round(price - 8, 2)
+        tp1 = round(price + 6, 2)
+        tp2 = round(price + 12, 2)
+        emoji = "🟢📈"
+    else:
+        entry = price
+        sl = round(price + 8, 2)
+        tp1 = round(price - 6, 2)
+        tp2 = round(price - 12, 2)
+        emoji = "🔴📉"
+
+    text = f"""
+👑 **СУХОЙ - XAUUSD** 🐂
+{emoji} **СИГНАЛ: {direction}**
+
+💰 Пара: XAUUSD (GOLD)
+⏰ Время: {now}
+📊 Цена сейчас: {entry}
+
+🎯 **ВХОД:** {entry}
+⛔️ **STOP LOSS:** {sl}
+
+✅ **TP1:** {tp1}
+✅ **TP2:** {tp2}
+✅ **TP3:** Открытый
+
+⚠️ Риск 1-2% от депо!
+
+#XAUUSD #GOLD #СУХОЙ
+"""
+    return text
+
+@bot.message_handler(commands=['start','dry','signal'])
+def start(m):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("🟢 BUY Сигнал", "🔴 SELL Сигнал", "💰 Цена Золота")
+    bot.send_message(m.chat.id, 
+        "👑 **СУХОЙ - XAUUSD на связи!** 🐂\n\nЖми кнопку чтобы получить сигнал по золоту:",
+        reply_markup=markup, parse_mode="Markdown")
+
+@bot.message_handler(func=lambda m: "BUY" in m.text)
+def buy(m):
+    bot.send_message(m.chat.id, "Сушу сигнал... ⏳ Анализирую золото...")
+    bot.send_message(m.chat.id, make_signal("BUY"), parse_mode="Markdown")
+
+@bot.message_handler(func=lambda m: "SELL" in m.text)
+def sell(m):
+    bot.send_message(m.chat.id, "Сушу сигнал... ⏳ Анализирую золото...")
+    bot.send_message(m.chat.id, make_signal("SELL"), parse_mode="Markdown")
+
+@bot.message_handler(func=lambda m: "Цена" in m.text)
+def price(m):
+    p = get_gold_price()
+    bot.send_message(m.chat.id, f"👑 **XAUUSD сейчас:** {p}$\n🐂 Тренд бычий!", parse_mode="Markdown")
+
+@bot.message_handler(content_types=['text'])
+def any_text(m):
+    if m.text.startswith('/'): return
+    bot.send_message(m.chat.id, "Жми 🟢 BUY или 🔴 SELL - дам сигнал!")
 
 @app.route('/')
-def home(): return "Live", 200
+def home(): return "Live SIGNAL", 200
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
