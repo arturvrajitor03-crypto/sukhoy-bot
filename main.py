@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os, time, requests, threading, datetime
 
 def fake_web():
@@ -39,7 +40,7 @@ def get_gold():
     elif rsi > 60:
         sig = "SELL"
     else:
-        sig = "BOKOVIK"
+        sig = "БОКОВИК"
     return LAST_PRICE, rsi, sig
 
 def calc_lot(bal):
@@ -53,12 +54,12 @@ def auto_loop():
     while True:
         try:
             price, rsi, sig = get_gold()
-            if sig != "BOKOVIK":
+            if sig != "БОКОВИК":
                 global CURRENT_POS
                 if CURRENT_POS is None:
                     lot, risk = calc_lot(BALANCE)
                     CURRENT_POS = sig
-                    msg = "AUTO " + sig + " PRICE " + str(int(price)) + " RSI " + str(rsi) + " LOT " + str(lot)
+                    msg = "АВТО " + sig + " Цена " + str(int(price)) + " RSI " + str(rsi) + " Лот " + str(lot)
                     for cid in list(CHATS):
                         send(cid, msg)
             time.sleep(180)
@@ -67,7 +68,7 @@ def auto_loop():
 threading.Thread(target=auto_loop, daemon=True).start()
 
 offset = 0
-print("V17.6 STARTED")
+print("V17.7 RU STARTED")
 while True:
     try:
         u = "https://api.telegram.org/bot" + TOKEN + "/getUpdates?offset=" + str(offset) + "&timeout=10"
@@ -80,23 +81,26 @@ while True:
             CHATS.add(cid)
             txt = upd["message"].get("text","").lower()
             if "/start" in txt:
-                send(cid, "V17.6 RU LIVE\nSam torguet\n1000$ start\n/check\n/balance\n/trades\n/lot\n/plan\n/status")
+                send(cid, "V17.7 RU LIVE\nСам торгует виртуально!\nСтарт 1000 долл\nШлет только BUY/SELL\n\nКоманды:\n/check - проверить сигнал\n/balance - баланс\n/trades - сделки\n/lot - расчет лота\n/plan - план 5000\n/status - статус")
             if "/check" in txt:
                 p, rsi, sig = get_gold()
-                send(cid, "BOKOVIK RSI " + str(rsi) + " PRICE " + str(int(p)) if sig=="BOKOVIK" else sig + " RSI " + str(rsi) + " PRICE " + str(int(p)))
+                if sig == "БОКОВИК":
+                    send(cid, "БОКОВИК 93 проц RSI " + str(rsi) + " Цена " + str(int(p)) + " Ждем")
+                else:
+                    send(cid, "Сигнал " + sig + " RSI " + str(rsi) + " Цена " + str(int(p)))
             if "/balance" in txt:
                 lot, risk = calc_lot(BALANCE)
-                send(cid, "Balans " + str(BALANCE) + " Lot " + str(lot) + " Risk " + str(int(risk)) + " Pos " + str(CURRENT_POS))
+                send(cid, "Баланс " + str(BALANCE) + " Лот " + str(lot) + " Риск " + str(int(risk)) + " Позиция " + str(CURRENT_POS))
             if "/trades" in txt:
-                send(cid, "Sdelok poka net" if not TRADES else "\n".join(TRADES[-10:]))
+                send(cid, "Сделок пока нет, ищем BUY/SELL" if not TRADES else "\n".join(TRADES[-10:]))
             if "/lot" in txt:
                 lot, risk = calc_lot(BALANCE)
-                send(cid, "Raschet lota Balans " + str(int(BALANCE)) + " Risk " + str(int(risk)) + " Lot " + str(lot))
+                send(cid, "Расчет лота от Бога\nБаланс " + str(int(BALANCE)) + "\nРиск 2 проц = " + str(int(risk)) + "\nЛот " + str(lot))
             if "/plan" in txt:
-                send(cid, "Plan 5000$ v nedelyu Seichas " + str(int(BALANCE)))
+                send(cid, "План 5000 в неделю\nСейчас " + str(int(BALANCE)) + "\nЧерез неделю " + str(int(BALANCE*1.1)) + "\nЧерез 10 недель " + str(int(BALANCE*2.59)))
             if "/status" in txt:
                 p, rsi, sig = get_gold()
-                send(cid, "V17.6 LIVE " + sig + " RSI " + str(rsi) + " Gold " + str(int(p)))
+                send(cid, "V17.7 LIVE\nСигнал " + sig + "\nRSI " + str(rsi) + "\nЗолото " + str(int(p)) + "\nБаланс " + str(int(BALANCE)))
     except Exception as e:
         print(str(e))
         time.sleep(5)
