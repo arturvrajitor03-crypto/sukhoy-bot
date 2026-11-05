@@ -9,6 +9,7 @@ bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 CHAT_FILE = "/tmp/chats.json"
+SIGNAL_FILE = "/tmp/signals.json"
 last_prices = []
 last_signal = 0
 
@@ -20,11 +21,19 @@ def load_chats():
         return set()
 
 def save_chats(chats):
+    with open(CHAT_FILE, 'w') as f:
+        json.dump(list(chats), f)
+
+def load_signals():
     try:
-        with open(CHAT_FILE, 'w') as f:
-            json.dump(list(chats), f)
+        with open(SIGNAL_FILE, 'r') as f:
+            return json.load(f)
     except:
-        pass
+        return []
+
+def save_signals(sigs):
+    with open(SIGNAL_FILE, 'w') as f:
+        json.dump(sigs, f)
 
 chat_ids = load_chats()
 
@@ -82,7 +91,7 @@ def make_signal(price, direction):
     bio = io.BytesIO()
     img.save(bio, format='JPEG', quality=98)
     bio.seek(0)
-    return bio
+    return bio, [sl, tp1, tp2, tp3]
 
 def auto_checker():
     global last_prices, last_signal, chat_ids
@@ -93,24 +102,70 @@ def auto_checker():
             last_prices.append(price)
             if len(last_prices) > 20:
                 last_prices.pop(0)
+            signals = load_signals()
+            keep = []
+            for sig in signals:
+                entry = sig["entry"]
+                d = sig["dir"]
+                tp1 = sig["tp1"]
+                tp2 = sig["tp2"]
+                tp3 = sig["tp3"]
+                sl = sig["sl"]
+                hit = sig["hit"]
+                msg = ""
+                if d == "BUY":
+                    if price >= tp1 and "tp1" not in hit:
+                        hit.append("tp1")
+                        msg = "Galochka TP1 proyden BUY " + str(entry) + " -> " + str(tp1)
+                    if price >= tp2 and "tp2" not in hit:
+                        hit.append("tp2")
+                        msg = "Galochka TP2 proyden BUY " + str(entry) + " -> " + str(tp2)
+                    if price >= tp3 and "tp3" not in hit:
+                        hit.append("tp3")
+                        msg = "Galochka TP3 proyden BUY " + str(entry) + " -> " + str(tp3)
+                else:
+                    if price <= tp1 and "tp1" not in hit:
+                        hit.append("tp1")
+                        msg = "Galochka TP1 proyden SELL " + str(entry) + " -> " + str(tp1)
+                    if price <= tp2 and "tp2" not in hit:
+                        hit.append("tp2")
+                        msg = "Galochka TP2 proyden SELL " + str(entry) + " -> " + str(tp2)
+                    if price <= tp3 and "tp3" not in hit:
+                        hit.append("tp3")
+                        msg = "Galochka TP3 proyden SELL " + str(entry) + " -> " + str(tp3)
+                if msg != "":
+                    cids = load_chats()
+                    for cid in list(cids):
+                        try:
+                            bot.send_message(cid, msg)
+                        except:
+                            pass
+                sig["hit"] = hit
+                if len(hit) < 3:
+                    keep.append(sig)
+            save_signals(keep)
             if len(last_prices) >= 10:
                 avg = sum(last_prices[:-1]) / (len(last_prices)-1)
                 diff = price - avg
-                signal = None
+                sig_type = None
                 if diff < -3.0:
-                    signal = "BUY"
-                elif diff > 3.0:
-                    signal = "SELL"
-                chat_ids = load_chats()
-                if signal and (time.time() - last_signal > 900) and chat_ids:
-                    img = make_signal(price, signal)
-                    for cid in list(chat_ids):
+                    sig_type = "BUY"
+                if diff > 3.0:
+                    sig_type = "SELL"
+                cids = load_chats()
+                if sig_type and (time.time() - last_signal > 900) and cids:
+                    img, vals = make_signal(price, sig_type)
+                    new_sig = {"entry": price, "dir": sig_type, "sl": vals[0], "tp1": vals[1], "tp2": vals[2], "tp3": vals[3], "hit": []}
+                    all_sigs = load_signals()
+                    all_sigs.append(new_sig)
+                    save_signals(all_sigs)
+                    for cid in list(cids):
                         try:
                             bot.send_photo(cid, img)
                         except:
                             pass
                     last_signal = time.time()
-            time.sleep(90)
+            time.sleep(60)
         except:
             time.sleep(60)
 
@@ -123,7 +178,7 @@ except:
 def s(m):
     chat_ids.add(m.chat.id)
     save_chats(chat_ids)
-    bot.send_message(m.chat.id, "Avto vhod vkluchen! Signal tolko kogda est tochka!", reply_markup=ReplyKeyboardRemove())
+    bot.send_message(m.chat.id, "Avto vhod vkluchen! Budu stavit galochki kogda TP proydet!", reply_markup=ReplyKeyboardRemove())
 
 @bot.message_handler(commands=['signal','buy','sell','dry','remove'])
 def cmd(m):
@@ -131,13 +186,16 @@ def cmd(m):
     save_chats(chat_ids)
     price = get_price()
     d = "BUY"
-    if m.text and "sell" in m.text.lower():
+    txt = m.text.lower()
+    if "sell" in txt:
         d = "SELL"
-    if m.text and "buy" in m.text.lower():
+    if "buy" in txt:
         d = "BUY"
-    if m.text and "dry" not in m.text.lower() and "sell" not in m.text.lower() and "buy" not in m.text.lower():
-        d = random.choice(["BUY", "SELL"])
-    img = make_signal(price, d)
+    img, vals = make_signal(price, d)
+    new_sig = {"entry": price, "dir": d, "sl": vals[0], "tp1": vals[1], "tp2": vals[2], "tp3": vals[3], "hit": []}
+    all_sigs = load_signals()
+    all_sigs.append(new_sig)
+    save_signals(all_sigs)
     bot.send_photo(m.chat.id, img)
 
 @app.route('/')
