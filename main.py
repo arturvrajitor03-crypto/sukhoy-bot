@@ -3,12 +3,12 @@ import threading, os, requests, time
 from flask import Flask
 app_flask = Flask(__name__)
 @app_flask.route('/')
-def home(): return "V14 AUTO BEAUTIFUL MAX LIVE"
+def home(): return "V15 SMART AUTO ONLY BUY/SELL LIVE"
 def run_flask(): app_flask.run(host='0.0.0.0', port=10000)
 threading.Thread(target=run_flask, daemon=True).start()
 
 TOKEN = os.getenv("BOT_TOKEN")
-CHATS = set() # подписчики
+CHATS = set()
 
 def get_gold():
     try:
@@ -36,27 +36,30 @@ def send(cid,t):
     try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id":cid,"text":t}, timeout=10)
     except: pass
 
-def auto_sender():
-    last_sig=""
+def smart_auto():
+    last_sent=""
     while True:
-        time.sleep(2100) # 35 минут
+        time.sleep(300) # проверка каждые 5 минут
         if not CHATS: continue
         p,rsi,sig,pw=get_gold()
         if not p: continue
-        # шлем только если сигнал поменялся или сильный
-        if sig=="БОКОВИК" and last_sig=="БОКОВИК": continue
-        last_sig=sig
+        # ШЛЕМ ТОЛЬКО BUY/SELL, боковик игнор
+        if sig not in ["ПОКУПКА","ПРОДАЖА"]: continue
+        # Не повторяем один и тот же сигнал
+        key=f"{sig}_{int(p)}"
+        if key==last_sent: continue
+        last_sent=key
+        
         if sig=="ПОКУПКА":
-            txt=f"🔔 АВТО-СИГНАЛ!\n\n🟢 ПОКУПКА\n🔥 Сила: {pw}%\n📈 RSI: {int(rsi)}\n💰 GOLD: {p:.2f}\n\n✅ Время брать лонг!"
-        elif sig=="ПРОДАЖА":
-            txt=f"🔔 АВТО-СИГНАЛ!\n\n🔴 ПРОДАЖА\n🔥 Сила: {pw}%\n📉 RSI: {int(rsi)}\n💰 GOLD: {p:.2f}\n\n✅ Время брать шорт!"
+            txt=f"🚨🚨🚨 СИГНАЛ! 🚨🚨🚨\n\n🟢 ПОКУПКА GOLD!\n🔥 Сила: {pw}%\n📈 RSI: {int(rsi)}\n💰 Цена: {p:.2f}$\n\n✅ ВХОДИ В ЛОНГ СЕЙЧАС!"
         else:
-            txt=f"🔔 АВТО-ОБНОВЛЕНИЕ\n\n⏳ БОКОВИК\n⚪ Сила: {pw}%\n📊 RSI: {int(rsi)}\n💰 GOLD: {p:.2f}\n\n⏸ Ждем..."
+            txt=f"🚨🚨🚨 СИГНАЛ! 🚨🚨🚨\n\n🔴 ПРОДАЖА GOLD!\n🔥 Сила: {pw}%\n📉 RSI: {int(rsi)}\n💰 Цена: {p:.2f}$\n\n✅ ВХОДИ В ШОРТ СЕЙЧАС!"
+        
         for cid in list(CHATS):
             send(cid,txt)
 
-threading.Thread(target=auto_sender, daemon=True).start()
-print("V14 AUTO STARTED")
+threading.Thread(target=smart_auto, daemon=True).start()
+print("V15 SMART STARTED")
 off=0
 while True:
     try:
@@ -68,18 +71,18 @@ while True:
             CHATS.add(cid)
             txt=(x["message"].get("text","")).strip().lower()
             if txt=="/start":
-                send(cid,"✨ СУХОЙ БОТ V14 AUTO MAX ✨\n🏆 ЗОЛОТО XAUUSD\n🔔 АВТО-сигналы каждые 35 мин ВКЛ!\n\n📊 /check - сигнал сейчас\n💰 /price - цена\n⚙️ /status - статус\n🔕 /stop - выкл авто")
+                send(cid,"✨ V15 SMART AUTO MAX ✨\n🏆 ЗОЛОТО XAUUSD\n🧠 Умный режим: шлю ТОЛЬКО когда BUY/SELL!\n⏳ Боковик не спамлю\n\n📊 /check - проверить сейчас\n💰 /price - цена\n⚙️ /status - статус")
             elif txt=="/check":
                 p,rsi,sig,pw=get_gold()
-                if not p: send(cid,"⏳ Думаю, /check еще раз")
-                elif sig=="ПОКУПКА": send(cid,f"🟢 ПОКУПКА\n🔥 Сила: {pw}%\n📈 RSI: {int(rsi)}\n💰 GOLD: {p:.2f}")
-                elif sig=="ПРОДАЖА": send(cid,f"🔴 ПРОДАЖА\n🔥 Сила: {pw}%\n📉 RSI: {int(rsi)}\n💰 GOLD: {p:.2f}")
-                else: send(cid,f"⏳ БОКОВИК\n⚪ Сила: {pw}%\n📊 RSI: {int(rsi)}\n💰 GOLD: {p:.2f}\n⏸ Ждем сигнал...")
+                if not p: send(cid,"⏳ Думаю...")
+                elif sig=="ПОКУПКА": send(cid,f"🟢 ПОКУПКА\n🔥 Сила: {pw}%\n📈 RSI: {int(rsi)}\n💰 {p:.2f}")
+                elif sig=="ПРОДАЖА": send(cid,f"🔴 ПРОДАЖА\n🔥 Сила: {pw}%\n📉 RSI: {int(rsi)}\n💰 {p:.2f}")
+                else: send(cid,f"⏳ БОКОВИК\n⚪ Сила: {pw}%\n📊 RSI: {int(rsi)}\n💰 {p:.2f}\n⏸ Ждем BUY/SELL...")
             elif txt=="/price":
                 p,rsi,_,_=get_gold()
                 if p: send(cid,f"💰 GOLD: {p:.2f}$ RSI: {int(rsi)}")
-            elif txt=="/status": send(cid,f"✅ V14 AUTO LIVE\n🔔 Авто каждые 35 мин\n👥 Подписчиков: {len(CHATS)}\n🟢 Работает 24/7")
+            elif txt=="/status": send(cid,f"✅ V15 SMART LIVE\n🧠 Режим: только BUY/SELL\n👥 Подписчиков: {len(CHATS)}\n🔍 Проверка каждые 5 мин")
             elif txt=="/stop":
                 CHATS.discard(cid)
-                send(cid,"🔕 Авто выкл. /start чтобы вкл снова")
+                send(cid,"🔕 Авто выкл")
     except: time.sleep(3)
