@@ -46,9 +46,8 @@ def get_price():
 
 def get_font(size, bold=False):
     try:
-        if bold:
-            return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", size)
-        return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", size)
+        p = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+        return ImageFont.truetype(p, size)
     except:
         return ImageFont.load_default()
 
@@ -70,92 +69,4 @@ def make_signal(price, direction):
         color = (255, 80, 80)
         sl = round(price + 8.5, 2)
         tp1 = round(price - 8, 2)
-        tp2 = round(price - 16, 2)
-        tp3 = round(price - 28, 2)
-    y = 250
-    draw.text((W//2, y), "SUHOY - XAUUSD", fill=(212,175,55), font=f1, anchor="mm")
-    y += 180
-    draw.text((W//2, y), direction, fill=color, font=f2, anchor="mm")
-    y += 120
-    draw.text((W//2, y), f"XAUUSD {price}", fill=color, font=f3, anchor="mm")
-    y += 140
-    draw.text((W//2, y), f"ENTRY: {price}", fill="white", font=f3, anchor="mm")
-    y += 85
-    draw.text((W//2, y), f"SL: {sl}", fill="white", font=f3, anchor="mm")
-    y += 120
-    draw.text((W//2, y), f"TP1: {tp1}", fill=color, font=f3, anchor="mm")
-    y += 85
-    draw.text((W//2, y), f"TP2: {tp2}", fill=color, font=f3, anchor="mm")
-    y += 85
-    draw.text((W//2, y), f"TP3: {tp3}", fill=color, font=f3, anchor="mm")
-    bio = io.BytesIO()
-    img.save(bio, format='JPEG', quality=98)
-    bio.seek(0)
-    return bio, [sl, tp1, tp2, tp3]
-
-def auto_checker():
-    global last_prices, last_signal, chat_ids
-    time.sleep(30)
-    while True:
-        try:
-            price = get_price()
-            last_prices.append(price)
-            if len(last_prices) > 20:
-                last_prices.pop(0)
-            signals = load_signals()
-            keep = []
-            for sig in signals:
-                entry = sig["entry"]
-                d = sig["dir"]
-                tp1 = sig["tp1"]
-                tp2 = sig["tp2"]
-                tp3 = sig["tp3"]
-                hit = sig["hit"]
-                msg = ""
-                if d == "BUY":
-                    if price >= tp1 and "tp1" not in hit:
-                        hit.append("tp1")
-                        msg = "Galochka TP1 proyden! BUY " + str(entry) + " -> " + str(tp1)
-                    if price >= tp2 and "tp2" not in hit:
-                        hit.append("tp2")
-                        msg = "Galochka TP2 proyden! BUY " + str(entry) + " -> " + str(tp2)
-                    if price >= tp3 and "tp3" not in hit:
-                        hit.append("tp3")
-                        msg = "Galochka TP3 proyden! BUY " + str(entry) + " -> " + str(tp3)
-                else:
-                    if price <= tp1 and "tp1" not in hit:
-                        hit.append("tp1")
-                        msg = "Galochka TP1 proyden! SELL " + str(entry) + " -> " + str(tp1)
-                    if price <= tp2 and "tp2" not in hit:
-                        hit.append("tp2")
-                        msg = "Galochka TP2 proyden! SELL " + str(entry) + " -> " + str(tp2)
-                    if price <= tp3 and "tp3" not in hit:
-                        hit.append("tp3")
-                        msg = "Galochka TP3 proyden! SELL " + str(entry) + " -> " + str(tp3)
-                if msg != "":
-                    cids = load_chats()
-                    for cid in list(cids):
-                        try:
-                            bot.send_message(cid, msg)
-                        except:
-                            pass
-                sig["hit"] = hit
-                if len(hit) < 3:
-                    keep.append(sig)
-            save_signals(keep)
-            if len(last_prices) >= 10:
-                avg = sum(last_prices[:-1]) / (len(last_prices)-1)
-                diff = price - avg
-                sig_type = None
-                if diff < -3.0:
-                    sig_type = "BUY"
-                if diff > 3.0:
-                    sig_type = "SELL"
-                cids = load_chats()
-                if sig_type and (time.time() - last_signal > 900) and cids:
-                    img, vals = make_signal(price, sig_type)
-                    new_sig = {"entry": price, "dir": sig_type, "sl": vals[0], "tp1": vals[1], "tp2": vals[2], "tp3": vals[3], "hit": []}
-                    all_sigs = load_signals()
-                    all_sigs.append(new_sig)
-                    save_signals(all_sigs)
-                    for cid in list(c
+        tp
