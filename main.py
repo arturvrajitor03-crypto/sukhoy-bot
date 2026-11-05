@@ -4,14 +4,13 @@ from flask import Flask
 import os, requests, time
 app_flask = Flask(__name__)
 @app_flask.route('/')
-def home(): return "V12 MAX NO BAN LIVE"
+def home(): return "V13 BEAUTIFUL MAX LIVE"
 def run_flask(): app_flask.run(host='0.0.0.0', port=10000)
 threading.Thread(target=run_flask, daemon=True).start()
 TOKEN = os.getenv("BOT_TOKEN")
 
 def get_gold():
     try:
-        # ЭТОТ ДОМЕН РАБОТАЕТ НА RENDER!
         base="https://data-api.binance.vision"
         r=requests.get(f"{base}/api/v3/ticker/price?symbol=PAXGUSDT", timeout=10).json()
         price=float(r["price"])
@@ -30,33 +29,35 @@ def get_gold():
         if rsi>72 and price<ema: return price,rsi,"ПРОДАЖА",98
         if rsi>62 and price<ema: return price,rsi,"ПРОДАЖА",85
         return price,rsi,"БОКОВИК",93
-    except Exception as e:
-        print(f"err {e}")
-        return None,None,"ERR",0
+    except: return None,None,"ERR",0
 
 def send(cid,t):
     try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id":cid,"text":t}, timeout=10)
     except: pass
 
-print("V12 STARTED")
+print("V13 BEAUTIFUL STARTED")
 off=0
 while True:
     try:
         d=requests.get(f"https://api.telegram.org/bot{TOKEN}/getUpdates?offset={off}&timeout=20", timeout=25).json()
-        for x in d.get("result", []):
+        for x in d.get("result",[]):
             off=x["update_id"]+1
             if "message" not in x: continue
             cid=x["message"]["chat"]["id"]
             txt=(x["message"].get("text","")).strip().lower()
-            if txt=="/start": send(cid,"СУХОЙ БОТ V12 - МАКСИМУМ 100%\n/check - сигнал\n/price - цена\n/status")
+            if txt=="/start":
+                send(cid,"✨ СУХОЙ БОТ V13 BEAUTIFUL MAX ✨\n🏆 ЗОЛОТО XAUUSD - ТОЛЬКО НА РУССКОМ\n\n📊 /check - сигнал\n💰 /price - цена\n⚙️ /status - статус")
             elif txt=="/check":
                 p,rsi,sig,pw=get_gold()
-                if not p: send(cid,"Подожди 5 сек и /check снова")
-                elif sig=="ПОКУПКА": send(cid,f"ПОКУПКА Сила {pw}% RSI {int(rsi)} GOLD {p:.2f}")
-                elif sig=="ПРОДАЖА": send(cid,f"ПРОДАЖА Сила {pw}% RSI {int(rsi)} GOLD {p:.2f}")
-                else: send(cid,f"БОКОВИК {pw}% RSI {int(rsi)} GOLD {p:.2f}")
+                if not p: send(cid,"⏳ Бинанс думает, нажми /check через 5 сек")
+                elif sig=="ПОКУПКА":
+                    send(cid,f"🟢 ПОКУПКА\n🔥 Сила: {pw}%\n📈 RSI: {int(rsi)}\n💰 GOLD: {p:.2f}\n\n✅ Можно брать лонг!")
+                elif sig=="ПРОДАЖА":
+                    send(cid,f"🔴 ПРОДАЖА\n🔥 Сила: {pw}%\n📉 RSI: {int(rsi)}\n💰 GOLD: {p:.2f}\n\n✅ Можно брать шорт!")
+                else:
+                    send(cid,f"⏳ БОКОВИК\n⚪ Сила: {pw}%\n📊 RSI: {int(rsi)}\n💰 GOLD: {p:.2f}\n\n⏸ Ждем сигнал...")
             elif txt=="/price":
                 p,rsi,_,_=get_gold()
-                if p: send(cid,f"GOLD {p:.2f} RSI {int(rsi)}")
-            elif txt=="/status": send(cid,"V12 LIVE - Binance Vision FIX")
+                if p: send(cid,f"💰 ЗОЛОТО XAUUSD\n💵 Цена: {p:.2f}$\n📊 RSI: {int(rsi)}")
+            elif txt=="/status": send(cid,"✅ V13 BEAUTIFUL LIVE\n🟢 Работает 24/7\n💎 data-api.binance.vision\n🚀 МАКСИМУМ 100%")
     except: time.sleep(3)
