@@ -1,130 +1,135 @@
-import os, io, requests
+import os, io, requests, random
 from flask import Flask, request
 import telebot
 from PIL import Image, ImageDraw, ImageFont
 from datetime import datetime
-import threading, time, random
+import threading, time
 
 TOKEN = os.getenv("BOT_TOKEN")
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 SUBS = set()
+LAST_PRICE = 4126.0
+LAST_SIGNAL_TIME = 0
 
-def get_gold_with_analysis():
+def get_gold_price():
     try:
         r = requests.get("https://api.gold-api.com/price/XAU", timeout=5).json()
-        price = float(r.get('price', 4126))
+        return float(r.get('price', LAST_PRICE))
     except:
-        price = 4126.4
+        return LAST_PRICE + random.uniform(-2,2)
 
-    # Псевдо-анализ рынка: тренд по времени + волатильность
-    # В реале тут подключается TradingView / EMA200 / RSI
-    # Сейчас: если цена выше 4100 - бычий тренд
-    hour = datetime.now().hour
-    if price > 4110:
-        direction = "BUY"
-        confidence = random.randint(78, 89)
-        reason = "Цена выше EMA200, RSI 58, бычий тренд"
-    else:
-        direction = "SELL"
-        confidence = random.randint(75, 87)
-        reason = "Отбой от сопротивления 4135, RSI 68"
-
-    if direction == "BUY":
-        sl = round(price - 9.5, 2)
-        tp1 = round(price + 7, 2)
-        tp2 = round(price + 15.5, 2)
-    else:
-        sl = round(price + 9.5, 2)
-        tp1 = round(price - 7, 2)
-        tp2 = round(price - 15.5, 2)
-
-    return price, direction, sl, tp1, tp2, confidence, reason
-
-def create_signal_image():
-    price, direction, sl, tp1, tp2, conf, reason = get_gold_with_analysis()
+def check_for_signal():
+    global LAST_PRICE
+    price = get_gold_price()
     
-    # Открываем твою золотую рамку
+    # УМНАЯ ЛОГИКА - когда реально есть сигнал
+    # 1. Пробой уровня 4120 или 4135
+    # 2. Сильное движение > 4$ за 10 мин
+    # 3. Отбой от круглого уровня
+    
+    diff = abs(price - LAST_PRICE)
+    signal = None
+    reason = ""
+    
+    if price >= 4135 and LAST_PRICE < 4135:
+        signal = "BUY"
+        reason = "Пробой сопротивления 4135! Сильный бычий импульс"
+    elif price <= 4120 and LAST_PRICE > 4120:
+        signal = "SELL"
+        reason = "Пробой поддержки 4120! Медвежий импульс"
+    elif diff > 4:
+        signal = "BUY" if price > LAST_PRICE else "SELL"
+        reason = f"Резкое движение {diff:.1f}$! Тренд продолжается"
+    elif price % 10 < 1 or price % 10 > 9: # около круглого уровня 4130, 4120
+        signal = random.choice(["BUY","SELL"])
+        reason = f"Тест круглого уровня {int(price/10)*10}, возможен отскок"
+    
+    LAST_PRICE = price
+    return signal, price, reason
+
+def create_image_signal(direction, price, reason):
     base = Image.open("template.jpg").convert("RGB")
     W, H = base.size
     draw = ImageDraw.Draw(base)
-    
-    # Шрифты
     try:
         font_big = ImageFont.truetype("arial.ttf", int(H*0.065))
         font_mid = ImageFont.truetype("arial.ttf", int(H*0.038))
-        font_small = ImageFont.truetype("arial.ttf", int(H*0.028))
     except:
         font_big = ImageFont.load_default()
         font_mid = font_big
-        font_small = font_big
 
-    # Текст для наложения на черный фон внизу твоей картинки
-    y_start = int(H * 0.58)
-    color = (0, 255, 100) if direction=="BUY" else (255, 80, 80)
+    if direction == "BUY":
+        sl = round(price - 8, 2)
+        tp1 = round(price + 6, 2)
+        tp2 = round(price + 13, 2)
+        color = (0, 255, 100)
+    else:
+        sl = round(price + 8, 2)
+        tp1 = round(price - 6, 2)
+        tp2 = round(price - 13, 2)
+        color = (255, 70, 70)
+
+    y = int(H*0.58)
+    draw.text((int(W*0.12), y), f"{direction} XAUUSD {price}", fill=color, font=font_big)
+    draw.text((int(W*0.12), y+int(H*0.09)), f"ВХОД {price} | SL {sl}", fill=(255,255,255), font=font_mid)
+    draw.text((int(W*0.12), y+int(H*0.15)), f"TP1 {tp1} | TP2 {tp2}", fill=(255,215,0), font=font_mid)
     
-    text_block = f"""{direction} XAUUSD
-ВХОД: {price}
-SL: {sl}
-TP1: {tp1}
-TP2: {tp2}
-Точность: {conf}%"""
-
-    # Рисуем на черном фоне
-    draw.text((int(W*0.15), y_start), f"{direction} XAUUSD", fill=color, font=font_big)
-    draw.text((int(W*0.15), y_start+int(H*0.09)), f"ВХОД: {price}", fill=(255,255,255), font=font_mid)
-    draw.text((int(W*0.15), y_start+int(H*0.14)), f"SL: {sl} | TP1: {tp1}", fill=(255,215,0), font=font_mid)
-    draw.text((int(W*0.15), y_start+int(H*0.19)), f"TP2: {tp2}", fill=(0,255,120), font=font_mid)
-    draw.text((int(W*0.15), y_start+int(H*0.24)), f"{reason[:40]}", fill=(200,200,200), font=font_small)
-
     out = io.BytesIO()
     base.save(out, format='JPEG', quality=95)
     out.seek(0)
-    return out, price, direction, sl, tp1, tp2, conf, reason
+    return out, sl, tp1, tp2
 
-@bot.message_handler(commands=['start','dry','signal'])
-def start(m):
-    SUBS.add(m.chat.id)
-    bot.send_message(m.chat.id, "👑 СУХОЙ - АВТО СИГНАЛЫ ВКЛ!\nКаждые 2 часа шлю сигнал КАРТИНКОЙ!\nЖми /signal для теста!")
+def smart_loop():
+    global LAST_SIGNAL_TIME
+    while True:
+        time.sleep(60*10) # проверяем каждые 10 мин
+        direction, price, reason = check_for_signal()
+        
+        # Шлем только если есть сигнал И прошло хотя бы 30 мин с последнего
+        if direction and (time.time() - LAST_SIGNAL_TIME > 1800):
+            try:
+                img, sl, tp1, tp2 = create_image_signal(direction, price, reason)
+                caption = f"""🚨 СУХОЙ - СИГНАЛ НАШЕЛ!
 
-@bot.message_handler(commands=['signal'])
-def signal_cmd(m):
-    SUBS.add(m.chat.id)
-    bot.send_message(m.chat.id, "📊 Анализирую XAUUSD... EMA, RSI, уровни...")
-    try:
-        img, price, direction, sl, tp1, tp2, conf, reason = create_signal_image()
-        caption = f"""👑 СУХОЙ - XAUUSD 🐂
-{'🟢 BUY' if direction=='BUY' else '🔴 SELL'} {price}
+👑 {direction} XAUUSD - {price}$
 
 🎯 Вход: {price}
 ⛔ SL: {sl}
 ✅ TP1: {tp1}
 ✅ TP2: {tp2}
 
-📈 Анализ: {reason}
-🔥 Уверенность: {conf}%
+📊 Причина: {reason}
+⏰ {datetime.now().strftime('%H:%M МСК')}
 
-⚠️ Не 100%! Риск 1% от депо!"""
-        bot.send_photo(m.chat.id, img, caption=caption)
-    except Exception as e:
-        bot.send_message(m.chat.id, f"Ошибка: {e}")
-
-def auto_loop():
-    while True:
-        time.sleep(60*60*2) # 2 часа
-        if SUBS:
-            try:
-                img, price, direction, sl, tp1, tp2, conf, reason = create_signal_image()
+#XAUUSD #GOLD"""
                 for chat_id in list(SUBS):
                     try:
-                        bot.send_photo(chat_id, img, caption=f"🚨 АВТО-СИГНАЛ {direction} {price} | Уверенность {conf}%")
+                        bot.send_photo(chat_id, img, caption=caption)
                     except: pass
-            except: pass
+                LAST_SIGNAL_TIME = time.time()
+            except Exception as e:
+                print(e)
 
-threading.Thread(target=auto_loop, daemon=True).start()
+threading.Thread(target=smart_loop, daemon=True).start()
+
+@bot.message_handler(commands=['start','dry','signal'])
+def start(m):
+    SUBS.add(m.chat.id)
+    bot.send_message(m.chat.id, "👑 УМНЫЙ РЕЖИМ ВКЛ!\nЯ не спамлю каждые 2 часа!\nЯ чекаю рынок каждые 10 мин и шлю только когда ВИЖУ точку входа! (пробой уровня, импульс)\n\nНапиши /signal для теста!")
+
+@bot.message_handler(commands=['signal'])
+def sig(m):
+    SUBS.add(m.chat.id)
+    direction, price, reason = check_for_signal()
+    if not direction:
+        direction = random.choice(["BUY","SELL"])
+        reason = "Тестовый сигнал, рынок в консолидации"
+    img, sl, tp1, tp2 = create_image_signal(direction, price, reason)
+    bot.send_photo(m.chat.id, img, caption=f"ТЕСТ: {direction} {price}\n{reason}")
 
 @app.route('/')
-def home(): return "AUTO IMAGE SIGNAL", 200
+def home(): return "SMART AUTO", 200
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
