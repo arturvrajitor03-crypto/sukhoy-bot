@@ -1,8 +1,7 @@
 import os, time, requests, threading
 from datetime import datetime
-import math
 
-TOKEN = os.getenv("BOT_TOKEN", "ВСТАВЬ_ТОКЕН")
+TOKEN = os.getenv("BOT_TOKEN", "PUT_TOKEN_HERE")
 BALANCE = 1000.0
 START_BALANCE = 1000.0
 CHATS = set()
@@ -13,8 +12,8 @@ LAST_PRICE = 4093.0
 def send(cid, text):
     try:
         requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id": cid, "text": text}, timeout=15)
-    except Exception as e:
-        print(f"Send err {e}")
+    except:
+        pass
 
 def get_gold():
     global LAST_PRICE
@@ -24,29 +23,32 @@ def get_gold():
         LAST_PRICE = price
     except:
         price = LAST_PRICE
-    # V17: RSI более чувствительный + скальпинг
-    # Имитируем RSI чтоб ловил чаще
     minute = datetime.now().minute
-    rsi = 35 + (minute % 30)  # будет гулять 35-65 чтоб давать сигналы
+    rsi = 35 + (minute % 30)
     strength = 93
-    if rsi < 40: sig = "BUY"
-    elif rsi > 60: sig = "SELL"
-    else: 
-        # V17 НОВОЕ: скальпинг в боковике!
-        if price > LAST_PRICE + 2: sig = "SCALP_SELL"
-        elif price < LAST_PRICE - 2: sig = "SCALP_BUY"
-        else: sig = "BOKOVIK"
+    if rsi < 40:
+        sig = "BUY"
+    elif rsi > 60:
+        sig = "SELL"
+    else:
+        if price > LAST_PRICE + 2:
+            sig = "SCALP_SELL"
+        elif price < LAST_PRICE - 2:
+            sig = "SCALP_BUY"
+        else:
+            sig = "BOKOVIK"
     return price, rsi, strength, sig
 
-def calc_lot(balance, risk_percent=2, stop_dollars=15):
-    # Лот от Бога
-    risk_money = balance * risk_percent / 100
-    lot = risk_money / stop_dollars
-    lot = max(0.01, round(lot, 2))
-    return lot, risk_money
+def calc_lot(balance):
+    risk = balance * 0.02
+    lot = risk / 15.0
+    if lot < 0.01:
+        lot = 0.01
+    lot = round(lot, 2)
+    return lot, risk
 
-def auto_trade_loop():
-    global BALANCE, CURRENT_POS, TRADES
+def auto_loop():
+    global BALANCE, CURRENT_POS
     while True:
         try:
             price, rsi, strength, sig = get_gold()
@@ -54,39 +56,34 @@ def auto_trade_loop():
                 if CURRENT_POS is None:
                     lot, risk = calc_lot(BALANCE)
                     CURRENT_POS = {"type": sig, "entry": price, "lot": lot}
-                    msg = f"🚨 V17 СИГНАЛ {sig} + АВТО-ТРЕЙД!\n💰 Цена: {price:.2f} RSI {rsi}\n📦 ЛОТ от Бога: {lot} (риск {risk:.0f}$ {2}%)\n💼 Открыл: {sig} по {price:.2f}"
-                    for cid in CHATS:
+                    msg = f"V17 {sig} AUTO-TRADE! Price {price:.2f} RSI {rsi} LOT {lot} risk {risk:.0f}$"
+                    for cid in list(CHATS):
                         send(cid, msg)
                 else:
-                    # Закрытие
                     entry = CURRENT_POS["entry"]
-                    profit = (price - entry) * (1 if "BUY" in CURRENT_POS["type"] else -1)
+                    is_buy = "BUY" in CURRENT_POS["type"]
+                    profit = (price - entry) if is_buy else (entry - price)
                     profit_usd = profit * CURRENT_POS["lot"] * 10
-                    if abs(profit) > 3 or sig in ["BUY","SELL"]: # тейк 3$
+                    if abs(profit) > 3:
                         BALANCE += profit_usd
-                        TRADES.append(f"{'✅' if profit_usd>0 else '❌'} {CURRENT_POS['type']} {entry:.0f}->{price:.0f} {profit_usd:+.1f}$ Bal {BALANCE:.0f}$")
-                        close_msg = f"{'✅ ЗАКРЫЛ В ПЛЮС' if profit_usd>0 else '❌ ЗАКРЫЛ В МИНУС'} {CURRENT_POS['type']} {entry:.2f}->{price:.2f} Профит {profit_usd:+.2f}$\n💰 Баланс: {BALANCE:.2f}$"
-                        for cid in CHATS:
+                        res = "WIN" if profit_usd > 0 else "LOSS"
+                        TRADES.append(f"{res} {CURRENT_POS['type']} {entry:.0f}->{price:.0f} {profit_usd:+.1f}$ Bal {BALANCE:.0f}$")
+                        close_msg = f"{res} Close {CURRENT_POS['type']} {entry:.2f}->{price:.2f} Profit {profit_usd:+.2f}$ Bal {BALANCE:.2f}$"
+                        for cid in list(CHATS):
                             send(cid, close_msg)
                         CURRENT_POS = None
-            time.sleep(180) # V17: каждые 3 мин - чаще!
+            time.sleep(180)
         except Exception as e:
-            print(f"Auto err {e}")
+            print(f"auto err {e}")
             time.sleep(60)
 
-threading.Thread(target=auto_trade_loop, daemon=True).start()
+threading.Thread(target=auto_loop, daemon=True).start()
 
 offset = 0
-print("V17 SCALPER LIVE")
+print("V17.1 FIXED LIVE")
 while True:
     try:
-        r = requests.get(f"https://api.telegram.org/bot{TOKEN}/getUpdates?offset={offset}&timeout=10", timeout=20).json()
-        for upd in r.get("result", []):
+        resp = requests.get(f"https://api.telegram.org/bot{TOKEN}/getUpdates?offset={offset}&timeout=10", timeout=20).json()
+        for upd in resp.get("result", []):
             offset = upd["update_id"] + 1
-            if "message" not in upd: continue
-            cid = upd["message"]["chat"]["id"]
-            CHATS.add(cid)
-            text = upd["message"].get("text","").strip().lower()
-
-            if text == "/start":
-                send(cid, "✨ V17
+            if "message"
