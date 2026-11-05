@@ -1,4 +1,4 @@
-import os, io, requests, random, threading, time
+import os, io, requests, random, threading, time, json
 from flask import Flask, request
 import telebot
 from telebot.types import ReplyKeyboardRemove
@@ -8,9 +8,40 @@ TOKEN = os.getenv("BOT_TOKEN")
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-chat_ids = set()
+CHAT_FILE = "/tmp/chats.json"
+SIGNAL_FILE = "/tmp/signals.json"
 last_prices = []
 last_signal = 0
+
+def load_chats():
+    try:
+        with open(CHAT_FILE, 'r') as f:
+            return set(json.load(f))
+    except:
+        return set()
+
+def save_chats(chats):
+    try:
+        with open(CHAT_FILE, 'w') as f:
+            json.dump(list(chats), f)
+    except:
+        pass
+
+def load_signals():
+    try:
+        with open(SIGNAL_FILE, 'r') as f:
+            return json.load(f)
+    except:
+        return []
+
+def save_signals(sigs):
+    try:
+        with open(SIGNAL_FILE, 'w') as f:
+            json.dump(sigs, f)
+    except:
+        pass
+
+chat_ids = load_chats()
 
 def get_price():
     try:
@@ -35,7 +66,6 @@ def make_signal(price, direction):
     f1 = get_font(52, False)
     f2 = get_font(110, True)
     f3 = get_font(56, True)
-
     if direction == "BUY":
         color = (0, 255, 100)
         sl = round(price - 8.5, 2)
@@ -48,9 +78,8 @@ def make_signal(price, direction):
         tp1 = round(price - 8, 2)
         tp2 = round(price - 16, 2)
         tp3 = round(price - 28, 2)
-
     y = 250
-    draw.text((W//2, y), "TEST - XAUUSD", fill=(212,175,55), font=f1, anchor="mm")
+    draw.text((W//2, y), "SUHOY - XAUUSD", fill=(212,175,55), font=f1, anchor="mm")
     y += 180
     draw.text((W//2, y), direction, fill=color, font=f2, anchor="mm")
     y += 120
@@ -65,14 +94,13 @@ def make_signal(price, direction):
     draw.text((W//2, y), f"TP2: {tp2}", fill=color, font=f3, anchor="mm")
     y += 85
     draw.text((W//2, y), f"TP3: {tp3}", fill=color, font=f3, anchor="mm")
-
     bio = io.BytesIO()
     img.save(bio, format='JPEG', quality=98)
     bio.seek(0)
-    return bio
+    return bio, {"entry": price, "dir": direction, "tp1": tp1, "tp2": tp2, "tp3": tp3, "sl": sl, "hit": []}
 
 def auto_checker():
-    global last_prices, last_signal
+    global last_prices, last_signal, chat_ids
     time.sleep(30)
     while True:
         try:
@@ -80,71 +108,30 @@ def auto_checker():
             last_prices.append(price)
             if len(last_prices) > 20:
                 last_prices.pop(0)
-            
-            if len(last_prices) >= 5:
-                avg = sum(last_prices[:-1]) / (len(last_prices)-1)
-                diff = price - avg
-                
-                signal = None
-                # ТЕСТ: достаточно движения 0.8$ вместо 3.5$
-                if diff < -0.8:
-                    signal = "BUY"
-                elif diff > 0.8:
-                    signal = "SELL"
-                
-                # ТЕСТ: шлем каждые 3 мин вместо 20
-                if signal and (time.time() - last_signal > 180) and chat_ids:
-                    img = make_signal(price, signal)
-                    for cid in list(chat_ids):
-                        try:
-                            bot.send_photo(cid, img, caption=f"TEST VHOd {signal} {price} diff {diff:.1f}")
-                        except:
-                            pass
-                    last_signal = time.time()
-            
-            time.sleep(60) # проверка каждую минуту
-        except:
-            time.sleep(60)
 
-try:
-    threading.Thread(target=auto_checker, daemon=True).start()
-except:
-    pass
-
-@bot.message_handler(commands=['start'])
-def s(m):
-    chat_ids.add(m.chat.id)
-    bot.send_message(m.chat.id, "TEST MODE vkluchen! Signal kajdye 3 min. Jdi 3-5 min.", reply_markup=ReplyKeyboardRemove())
-    # сразу шлем 1 сигнал для проверки
-    price = get_price()
-    d = random.choice(["BUY","SELL"])
-    img = make_signal(price, d)
-    bot.send_photo(m.chat.id, img, caption="TEST - pervy signal srazu")
-
-@bot.message_handler(commands=['signal','buy','sell','dry','remove'])
-def cmd(m):
-    chat_ids.add(m.chat.id)
-    price = get_price()
-    d = "BUY"
-    if m.text:
-        if "sell" in m.text.lower():
-            d = "SELL"
-        elif "buy" in m.text.lower():
-            d = "BUY"
-        else:
-            d = random.choice(["BUY", "SELL"])
-    img = make_signal(price, d)
-    bot.send_photo(m.chat.id, img)
-
-@app.route('/')
-def h():
-    return "TEST MODE",200
-
-@app.route('/webhook', methods=['POST'])
-def wh():
-    u = telebot.types.Update.de_json(request.stream.read().decode('utf-8'))
-    bot.process_new_updates([u])
-    return 'ok',200
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
+            # 1. Проверка активных сигналов на ТП
+            signals = load_signals()
+            new_signals = []
+            for sig in signals:
+                hit = sig.get("hit", [])
+                msg = None
+                if sig["dir"] == "BUY":
+                    if price >= sig["tp1"] and "tp1" not in hit:
+                        hit.append("tp1")
+                        msg = f"✅ TP1 ПРОЙДЕН! BUY {sig['entry']} -> {sig['tp1']} (+8$)\nТекущая цена: {price}"
+                    elif price >= sig["tp2"] and "tp2" not in hit:
+                        hit.append("tp2")
+                        msg = f"✅✅ TP2 ПРОЙДЕН! BUY {sig['entry']} -> {sig['tp2']} (+16$)\nЦена: {price}"
+                    elif price >= sig["tp3"] and "tp3" not in hit:
+                        hit.append("tp3")
+                        msg = f"✅✅✅ TP3 ПРОЙДЕН! BUY {sig['entry']} -> {sig['tp3']} (+28$) 🔥\nЦена: {price}"
+                    if price <= sig["sl"] and "sl" not in hit:
+                        hit.append("sl")
+                        msg = f"❌ SL {sig['entry']} -> {sig['sl']}"
+                else:
+                    if price <= sig["tp1"] and "tp1" not in hit:
+                        hit.append("tp1")
+                        msg = f"✅ TP1 ПРОЙДЕН! SELL {sig['entry']} -> {sig['tp1']} (+8$)\nЦена: {price}"
+                    elif price <= sig["tp2"] and "tp2" not in hit:
+                        hit.append("tp2")
+                        msg = f"✅✅ TP2 ПРОЙДЕН! SELL {sig['entry']} -> {sig['tp2
