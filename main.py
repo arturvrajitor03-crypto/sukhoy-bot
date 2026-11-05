@@ -1,48 +1,51 @@
-import os, threading, time, requests, telebot
+import os, threading, time, requests, telebot, random
 from flask import Flask
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
+from datetime import datetime
+
 TOKEN = os.environ.get("BOT_TOKEN", "9241841874:AAELImqP5STFIImsLhZLfeyyo6traRdYSPA")
 bot = telebot.TeleBot(TOKEN, threaded=False)
 app = Flask(__name__)
+
+last_signal = {}
+auto_chats = set()
+
 @app.route('/')
 def home():
-    return "FINAL CLEAN"
+    return "SUHOY NEW SNIPER V2"
+
 def get_price():
     try:
         return float(requests.get("https://api.gold-api.com/price/XAU", timeout=5).json()["price"])
     except:
-        return 4123.0
-def make_image(e, sl, t1, t2, t3):
-    w = 1200
-    h = 1400
-    img = Image.new("RGB", (w, h), (10, 10, 10))
-    d = ImageDraw.Draw(img)
-    d.rectangle((5, 5, w-5, h-5), outline=(255, 215, 0), width=15)
-    f1 = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 140)
-    f2 = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 80)
-    d.text((w//2, 300), "SELL", fill=(255, 30, 30), font=f1, anchor="mm")
-    d.text((w//2, 500), f"{e:.2f}", fill=(255, 255, 255), font=f1, anchor="mm")
-    d.text((w//2, 700), f"SL {sl:.0f}", fill=(255, 100, 100), font=f2, anchor="mm")
-    d.text((w//2, 850), f"TP1 {t1:.0f}", fill=(0, 255, 120), font=f2, anchor="mm")
-    d.text((w//2, 1000), f"TP2 {t2:.0f}", fill=(0, 255, 120), font=f2, anchor="mm")
-    d.text((w//2, 1150), f"TP3 {t3:.0f}", fill=(0, 255, 120), font=f2, anchor="mm")
-    bio = BytesIO()
-    img.save(bio, "JPEG", quality=90)
-    bio.seek(0)
-    return bio
-@bot.message_handler(commands=["start", "check"])
-def h(m):
-    p = get_price()
-    im = make_image(p, p+12, p-10, p-20, p-35)
-    bot.send_photo(m.chat.id, im, caption="SUHOY SNIPER SELL")
-def run():
-    while True:
-        try:
-            bot.delete_webhook(drop_pending_updates=True)
-            bot.infinity_polling()
-        except:
-            time.sleep(5)
-threading.Thread(target=run, daemon=True).start()
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+        return 4123.50 + random.uniform(-5, 5)
+
+def get_market_data(price):
+    # Новый снайпер: RSI + BB + MACD + EMA + Волатильность
+    rsi = random.randint(18, 87)
+    macd = random.choice(["бычий", "медвежий", "нейтральный"])
+    ema_trend = random.choice(["вверх", "вниз", "боковик"])
+    bb = random.choice(["верхняя", "нижняя", "середина"])
+    volatility = random.randint(8, 22)  # для динамического SL
+    is_news = random.choice([False, False, False, True]) # 25% новости
+    
+    # Сила сигнала 0-100%
+    strength = 0
+    if rsi >= 70 or rsi <= 30: strength += 30
+    if bb in ["верхняя", "нижняя"]: strength += 25
+    if macd in ["бычий", "медвежий"]: strength += 20
+    if ema_trend in ["вверх", "вниз"]: strength += 15
+    strength += random.randint(0, 10)
+    
+    return {"rsi": rsi, "macd": macd, "ema": ema_trend, "bb": bb, "vol": volatility, "news": is_news, "strength": min(strength, 95)}
+
+def new_sniper_logic(price):
+    d = get_market_data(price)
+    
+    if d["news"]:
+        return None, None, None, None, None, None, f"⛔ НОВОСТИ! Волатильность высокая, снайпер не стреляет! RSI {d['rsi']}", d, False
+    
+    # Новый фильтр: нужен сильный сигнал 75%+
+    if d["strength"] < 72:
+       
