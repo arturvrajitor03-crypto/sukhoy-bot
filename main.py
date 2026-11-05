@@ -9,23 +9,20 @@ bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 def make_suhoy(user_bytes):
-    # Используем твой template.jpg который уже в репозитории
-    try:
-        frame = Image.open("template.jpg").convert("RGB")
-    except:
-        frame = Image.open("frame.jpg").convert("RGB")
-        
+    frame = Image.open("template.jpg").convert("RGB")
     user_img = Image.open(io.BytesIO(user_bytes)).convert("RGB")
 
     W, H = frame.size
-    left = int(W * 0.08)
-    top = int(H * 0.42)
-    right = int(W * 0.92)
-    bottom = int(H * 0.88)
+    # Зона под быком - твое пустое черное место
+    left = int(W * 0.12)
+    top = int(H * 0.56)  # чуть ниже быка
+    right = int(W * 0.88)
+    bottom = int(H * 0.93)
     
     box_w = right - left
     box_h = bottom - top
     
+    # Вписываем фото клиента
     user_img.thumbnail((box_w, box_h), Image.LANCZOS)
     
     result = frame.copy()
@@ -34,13 +31,13 @@ def make_suhoy(user_bytes):
     result.paste(user_img, (x, y))
     
     out = io.BytesIO()
-    result.save(out, format='JPEG', quality=95)
+    result.save(out, format='JPEG', quality=96)
     out.seek(0)
     return out
 
 @bot.message_handler(commands=['start','dry'])
 def start(m):
-    bot.send_message(m.chat.id, "👑 СУХОЙ - XAUUSD на связи!\nКидай фото одежды - упакую в золото 🐂")
+    bot.send_message(m.chat.id, "👑 СУХОЙ - XAUUSD на связи!\nКидай фото - упакую в золото 🐂")
 
 @bot.message_handler(content_types=['photo'])
 def handle_photo(m):
@@ -54,8 +51,7 @@ def handle_photo(m):
         bot.send_message(m.chat.id, f"Ошибка: {e}")
 
 @app.route('/')
-def home():
-    return "Live", 200
+def home(): return "Live", 200
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
