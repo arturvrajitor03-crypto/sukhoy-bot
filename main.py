@@ -2,18 +2,15 @@ import threading
 from flask import Flask
 import os, requests, time
 
-# === ФИКС ДЛЯ RENDER - ОТКРЫВАЕМ ПОРТ ===
 app_flask = Flask(__name__)
 @app_flask.route('/')
 def home():
-    return "V8 ULTRA LIVE - Bot is running!"
+    return "V8 LIVE"
 def run_flask():
     app_flask.run(host='0.0.0.0', port=10000)
 threading.Thread(target=run_flask, daemon=True).start()
-# === КОНЕЦ ФИКСА ===
 
 TOKEN = os.getenv("BOT_TOKEN")
-AUTO = False
 
 def get_signal():
     try:
@@ -34,16 +31,16 @@ def get_signal():
         sl = price*0.998 if sig=="BUY" else price*1.002
         tp = price*1.005 if sig=="BUY" else price*0.995
         return price,rsi,sig,sl,tp
-    except Exception as e:
-        print(f"Signal error: {e}")
+    except:
         return None,None,"ERROR",0,0
 
 def send(chat_id, text):
     try:
         requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id": chat_id, "text": text}, timeout=10)
-    except: pass
+    except:
+        pass
 
-print("V8 ULTRA STARTED - Waiting for commands...")
+print("V8 STARTED")
 offset=0
 while True:
     try:
@@ -53,6 +50,18 @@ while True:
             if "message" not in u: continue
             chat_id = u["message"]["chat"]["id"]
             txt = u["message"].get("text","")
-            print(f"Got: {txt}")
-            if txt=="/start":
-                send(chat_id, "🤖 V8 ULTRA LIVE!\n\n/check - сигнал GOLD\n/auto_on -
+            if txt == "/start":
+                send(chat_id, "V8 LIVE! Commands: /check /auto_on /auto_off")
+            elif txt == "/check":
+                p,rsi,sig,sl,tp = get_signal()
+                if not p:
+                    send(chat_id, "Error Binance")
+                else:
+                    send(chat_id, f"GOLD {p:.2f} RSI {rsi:.1f} SIG {sig} SL {sl:.2f} TP {tp:.2f}")
+            elif txt == "/auto_on":
+                send(chat_id, "AUTO ON")
+            elif txt == "/auto_off":
+                send(chat_id, "AUTO OFF")
+    except Exception as e:
+        print(e)
+        time.sleep(5)
