@@ -110,29 +110,28 @@ def auto_checker():
                 tp1 = sig["tp1"]
                 tp2 = sig["tp2"]
                 tp3 = sig["tp3"]
-                sl = sig["sl"]
                 hit = sig["hit"]
                 msg = ""
                 if d == "BUY":
                     if price >= tp1 and "tp1" not in hit:
                         hit.append("tp1")
-                        msg = "Galochka TP1 proyden BUY " + str(entry) + " -> " + str(tp1)
+                        msg = "Galochka TP1 proyden! BUY " + str(entry) + " -> " + str(tp1)
                     if price >= tp2 and "tp2" not in hit:
                         hit.append("tp2")
-                        msg = "Galochka TP2 proyden BUY " + str(entry) + " -> " + str(tp2)
+                        msg = "Galochka TP2 proyden! BUY " + str(entry) + " -> " + str(tp2)
                     if price >= tp3 and "tp3" not in hit:
                         hit.append("tp3")
-                        msg = "Galochka TP3 proyden BUY " + str(entry) + " -> " + str(tp3)
+                        msg = "Galochka TP3 proyden! BUY " + str(entry) + " -> " + str(tp3)
                 else:
                     if price <= tp1 and "tp1" not in hit:
                         hit.append("tp1")
-                        msg = "Galochka TP1 proyden SELL " + str(entry) + " -> " + str(tp1)
+                        msg = "Galochka TP1 proyden! SELL " + str(entry) + " -> " + str(tp1)
                     if price <= tp2 and "tp2" not in hit:
                         hit.append("tp2")
-                        msg = "Galochka TP2 proyden SELL " + str(entry) + " -> " + str(tp2)
+                        msg = "Galochka TP2 proyden! SELL " + str(entry) + " -> " + str(tp2)
                     if price <= tp3 and "tp3" not in hit:
                         hit.append("tp3")
-                        msg = "Galochka TP3 proyden SELL " + str(entry) + " -> " + str(tp3)
+                        msg = "Galochka TP3 proyden! SELL " + str(entry) + " -> " + str(tp3)
                 if msg != "":
                     cids = load_chats()
                     for cid in list(cids):
@@ -159,54 +158,4 @@ def auto_checker():
                     all_sigs = load_signals()
                     all_sigs.append(new_sig)
                     save_signals(all_sigs)
-                    for cid in list(cids):
-                        try:
-                            bot.send_photo(cid, img)
-                        except:
-                            pass
-                    last_signal = time.time()
-            time.sleep(60)
-        except:
-            time.sleep(60)
-
-try:
-    threading.Thread(target=auto_checker, daemon=True).start()
-except:
-    pass
-
-@bot.message_handler(commands=['start'])
-def s(m):
-    chat_ids.add(m.chat.id)
-    save_chats(chat_ids)
-    bot.send_message(m.chat.id, "Avto vhod vkluchen! Budu stavit galochki kogda TP proydet!", reply_markup=ReplyKeyboardRemove())
-
-@bot.message_handler(commands=['signal','buy','sell','dry','remove'])
-def cmd(m):
-    chat_ids.add(m.chat.id)
-    save_chats(chat_ids)
-    price = get_price()
-    d = "BUY"
-    txt = m.text.lower()
-    if "sell" in txt:
-        d = "SELL"
-    if "buy" in txt:
-        d = "BUY"
-    img, vals = make_signal(price, d)
-    new_sig = {"entry": price, "dir": d, "sl": vals[0], "tp1": vals[1], "tp2": vals[2], "tp3": vals[3], "hit": []}
-    all_sigs = load_signals()
-    all_sigs.append(new_sig)
-    save_signals(all_sigs)
-    bot.send_photo(m.chat.id, img)
-
-@app.route('/')
-def h():
-    return "SUHOY LIVE",200
-
-@app.route('/webhook', methods=['POST'])
-def wh():
-    u = telebot.types.Update.de_json(request.stream.read().decode('utf-8'))
-    bot.process_new_updates([u])
-    return 'ok',200
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
+                    for cid in list(c
