@@ -2,14 +2,14 @@ import requests, time, os
 from threading import Thread
 from flask import Flask
 
-# ТВОЙ ТОКЕН УЖЕ ВСТАВЛЕН!
 TOKEN = "9241841874:AAHTlOiEs7jg7RDFbCcMWXXR6DFGsi-QlAc"
-CHAT_ID = "СЮДА_ВСТАВЬ_ID_ОТ_USERINFOBOT"  # <-- сюда вставь ID от @userinfobot
+CHAT_ID = "123456789"  # ЗАМЕНИ ЭТО НА СВОЙ ID ОТ @userinfobot
 
 app = Flask(__name__)
+
 @app.route('/')
-def home(): 
-    return "BOT V38 RABOTAET - Цена 4064 - Все ок!"
+def home():
+    return "BOT RABOTAET OK"
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
@@ -20,18 +20,14 @@ time.sleep(2)
 
 def send(text):
     try:
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": text}, timeout=10)
-        print(f"TG отправил: {text[:30]}", flush=True)
+        url = "https://api.telegram.org/bot" + TOKEN + "/sendMessage"
+        requests.post(url, data={"chat_id": CHAT_ID, "text": text}, timeout=10)
+        print("TG SEND OK", flush=True)
     except Exception as e:
-        print(f"TG ошибка: {e}", flush=True)
+        print("TG ERR", e, flush=True)
 
 print("=== BOT ZAPUSTILSYA V38 ===", flush=True)
-
-# Пытаемся отправить тест - если CHAT_ID верный, придет сообщение
-try:
-    send("✅ БОТ ЗАПУСТИЛСЯ! Тест с токеном 9241841874 - Я РАБОТАЮ!")
-except:
-    pass
+send("TEST BOT ZAPUSTILSYA - PROVERKA")
 
 while True:
     try:
@@ -40,15 +36,9 @@ while True:
         closes = [float(x[4]) for x in data['result']['list']][::-1]
         price = closes[-1]
         ma7 = sum(closes[-7:])/7
-        
-        g = l = 0
-        for i in range(-6, 0):
-            d = closes[i] - closes[i-1]
-            if d > 0: g += d
-            else: l -= d
-        rsi = 100 - (100 / (1 + g/(l+0.001)))
-
-        print(f"{time.strftime('%H:%M:%S')} Цена {price:.2f} MA7 {ma7:.2f} RSI {rsi:.1f}", flush=True)
-
-        if price > ma7 and rsi < 78:
-            send(f"🟢 BUY 85% X
+        print("Price %.2f MA7 %.2f" % (price, ma7), flush=True)
+        if price > ma7:
+            send("BUY 85pct XAUUSD %.2f above MA7" % price)
+    except Exception as e:
+        print("ERR", e, flush=True)
+    time.sleep(60)
