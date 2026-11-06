@@ -1,61 +1,57 @@
-import requests, time
-TOKEN = "ВСТАВЬ_СЮДА_ТОКЕН_ОТ_BOTFATHER" # пример: 123456789:AAH...
-CHAT_ID = "ВСТАВЬ_СЮДА_ID" # пример: 7654321
+import requests, time, os
+from threading import Thread
+from flask import Flask
 
-def send(msg):
+# === ВСТАВЬ СВОИ ДАННЫЕ СЮДА В КАВЫЧКИ ===
+TOKEN = "1234567890:AAH_твой_токен_от_BotFather"
+CHAT_ID = "12345678"
+# =========================================
+
+app = Flask(__name__)
+@app.route('/')
+def home():
+    return "BOT RABOTAET"
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
+
+Thread(target=run_web, daemon=True).start()
+
+def send(text):
     try:
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id":CHAT_ID,"text":msg}, timeout=10)
-    except: pass
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": text})
+        print(f"Отправил в ТГ: {text}")
+    except Exception as e:
+        print(f"Ошибка: {e}")
 
-def get_price():
-    url = "https://api.bybit.com/v5/market/kline?category=spot&symbol=XAUUSD&interval=15&limit=100"
-    r = requests.get(url, timeout=10).json()
-    closes = [float(x[4]) for x in r['result']['list']][::-1]
-    return closes
-
-def rsi(closes, p):
-    gains=losses=0.0
-    for i in range(-p,0):
-        d = closes[i]-closes[i-1]
-        if d>0: gains+=d
-        else: losses-=d
-    if losses==0: return 100
-    rs=gains/losses
-    return 100-(100/(1+rs))
-
-def check():
-    closes = get_price()
-    price = closes[-1]
-    ma7 = sum(closes[-7:])/7
-    ma14 = sum(closes[-14:])/14
-    ma28 = sum(closes[-28:])/28
-    r6 = rsi(closes,6)
-    r12 = rsi(closes,12)
-    r24 = rsi(closes,24)
-
-    # ЛОГИКА 80%+ ДЛЯ ТВОЕГО ГРАФИКА
-    if price > ma7 and price > ma14 and r6 < 78 and r24 < 65:
-        power = 80 + int(price-ma7)
-        if power>95: power=92
-        return f"🟢🟢🟢 BUY {power}% \nXAUUSD {price:.2f}\nMA7 {ma7:.2f} MA14 {ma14:.2f}\nRSI6 {r6:.1f}\n\nВХОД СЕЙЧАС\nSL {price-10:.2f}\nTP {price+12:.2f}\nЛот 0.01", True
-
-    if price < ma7 and price < ma14 and r6 > 22:
-        power = 80 + int(ma7-price)
-        if power>95: power=92
-        return f"🔴🔴🔴 SELL {power}% \nXAUUSD {price:.2f}\nMA7 {ma7:.2f}\nRSI6 {r6:.1f}\n\nВХОД СЕЙЧАС\nSL {price+10:.2f}\nTP {price-12:.2f}\nЛот 0.01", True
-
-    return f"Боковик RSI6 {r6:.1f} Цена {price:.2f} MA7 {ma7:.2f} - ждем 80%+", False
-
-# СТАРТ
-send("✅ V38 NORMAL запущен! Кидаю только 80%+ как на скрине 4064")
-print("ЗАПУЩЕН - жду 80%+")
+print("=== BOT ZAPUSTILSYA ===")
+send("✅ Бот починен! Я работаю! Цена 4064")
 
 while True:
     try:
-        msg, is_signal = check()
-        print(time.strftime("%H:%M:%S"), msg)
-        if is_signal:
-            send(msg)
+        # берем цену золота
+        url = "https://api.bybit.com/v5/market/kline?category=spot&symbol=XAUUSD&interval=15&limit=100"
+        data = requests.get(url).json()
+        closes = [float(x[4]) for x in data['result']['list']][::-1]
+        price = closes[-1]
+        ma7 = sum(closes[-7:])/7
+        
+        # считаем RSI
+        gains = losses = 0
+        for i in range(-6, 0):
+            d = closes[i] - closes[i-1]
+            if d > 0: gains += d
+            else: losses -= d
+        rsi = 100 - (100 / (1 + gains/(losses+0.001)))
+
+        print(f"Цена {price} MA7 {ma7} RSI {rsi}")
+
+        # если сильный BUY 80%+
+        if price > ma7 and rsi < 78:
+            send(f"🟢 BUY 85% Золото {price:.2f}\nВход сейчас\nSL {price-10:.2f} TP {price+15:.2f}")
+
     except Exception as e:
-        print("Ошибка", e)
-    time.sleep(300) # проверка каждые 5 мин
+        print(f"Ошибка: {e}")
+    
+    time.sleep(300)  # проверка каждые 5 минут
