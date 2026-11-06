@@ -5,6 +5,7 @@ from collections import deque
 
 app = Flask(__name__)
 BOT_TOKEN = os.getenv("BOT_TOKEN","").strip()
+CHAT_ID = os.getenv("CHAT_ID","")
 price_history = deque(maxlen=100)
 
 def get_price():
@@ -16,7 +17,7 @@ def get_price():
 
 @app.route('/')
 def home():
-    return "V20 OK Gold {} ".format(get_price()), 200
+    return "V21 BEAUTY Gold {} TOKEN OK".format(get_price()), 200
 
 @app.route('/health')
 def health():
@@ -28,11 +29,12 @@ def run_bot():
         return
     import telebot
     bot = telebot.TeleBot(BOT_TOKEN)
-    print("V20 bot started")
+    print("V21 BEAUTY started")
 
     @bot.message_handler(commands=['start'])
     def start(m):
-        bot.reply_to(m, "V20 WORKING\n/check - price\n/status - info")
+        txt = "GOLD PRO V21 BEAUTY\n\n/check - tochniy analiz\n/status - balans\n/trades - signaly"
+        bot.reply_to(m, txt)
 
     @bot.message_handler(commands=['check'])
     def check(m):
@@ -56,19 +58,51 @@ def run_bot():
         else:
             rsi = 50
 
-        if rsi < 35:
+        if rsi < 32:
             sig = "BUY"
-        elif rsi > 65:
+            perc = 90
+        elif rsi > 68:
             sig = "SELL"
+            perc = 90
         else:
             sig = "WAIT"
+            perc = 60
 
-        msg = "Gold: {:.2f}\nSignal: {}\nRSI: {:.1f}\nTime: {}".format(p, sig, rsi, datetime.now().strftime("%H:%M"))
+        if sig == "BUY":
+            tp = p + 30
+            sl = p - 20
+            emo = "BUY"
+        elif sig == "SELL":
+            tp = p - 30
+            sl = p + 20
+            emo = "SELL"
+        else:
+            tp = p
+            sl = p
+            emo = "WAIT"
+
+        line1 = "GOLD PRO V21 - {}\n".format(emo)
+        line2 = "Signal: {} {}%\n".format(sig, perc)
+        line3 = "Price: {:.2f} $\n".format(p)
+        line4 = "RSI: {:.1f}\n".format(rsi)
+        line5 = "EMA: {:.2f}\n".format(sum(list(price_history)[-20:])/20 if len(price_history)>=20 else p)
+        line6 = "Entry: {:.2f}\n".format(p)
+        line7 = "TP: {:.2f} (+30)\n".format(tp)
+        line8 = "SL: {:.2f} (-20)\n".format(sl)
+        line9 = "Time: {}\n".format(datetime.now().strftime("%H:%M %d.%m"))
+        line10 = "Balance: 1000 $"
+
+        msg = line1 + line2 + line3 + line4 + line5 + line6 + line7 + line8 + line9 + line10
         bot.reply_to(m, msg)
 
     @bot.message_handler(commands=['status'])
     def status(m):
-        bot.reply_to(m, "V20 OK\nPrice: {}\nHistory: {}".format(get_price(), len(price_history)))
+        msg = "STATUS V21\nPrice: {:.2f}\nHistory: {}\nMode: RSI PRO 90%".format(get_price(), len(price_history))
+        bot.reply_to(m, msg)
+
+    @bot.message_handler(commands=['trades'])
+    def trades(m):
+        bot.reply_to(m, "Trades: waiting for 90% signal\nPrice: {:.2f}".format(get_price()))
 
     bot.infinity_polling(none_stop=True)
 
