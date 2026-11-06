@@ -1,4 +1,4 @@
-import os, time, threading, requests
+import os, time, threading, requests, base64
 from flask import Flask
 from datetime import datetime
 from collections import deque
@@ -14,9 +14,12 @@ def get_price():
     except:
         return 4045.0
 
+def D(s):
+    return base64.b64decode(s).decode('utf-8')
+
 @app.route('/')
 def home():
-    return "V27 ULTIMATE SIMPLE Gold {} ".format(get_price()), 200
+    return "V29 MULTI TP RUS Gold {} ".format(get_price()), 200
 
 @app.route('/health')
 def health():
@@ -28,11 +31,11 @@ def run_bot():
         return
     import telebot
     bot = telebot.TeleBot(BOT_TOKEN)
-    print("V27 STARTED")
+    print("V29 STARTED")
 
     @bot.message_handler(commands=['start'])
     def start(m):
-        bot.reply_to(m, "V27 BEST READY /check /status")
+        bot.reply_to(m, "V29 MULTI TP READY /check")
 
     @bot.message_handler(commands=['check'])
     def check(m):
@@ -61,69 +64,41 @@ def run_bot():
         ema20 = sum(lst[-20:]) / 20
         ema50 = sum(lst[-50:]) / 50 if len(lst) >= 50 else ema20
 
+        POK = D("0J/QntCa0KPQn9Ca0JA=")
+        PRO = D("0J/RgNCe0JTQkNCW0JA=")
+        BOK = D("0JHQntCa0J7QktCY0Kg=")
+        ZOL = D("0JfQntCb0J7QotCe")
+        VHO = D("0JLRhdC+0LQ=")
+        STO = D("0KHRgtC+0L8=")
+        VRE = D("0JLRgNC10LzRjw==")
+        TP1 = D("0KLQnDE=")
+        TP2 = D("0KLQnDI=")
+        TP3 = D("0KLQnDM=")
+
         if rsi < 30:
-            sig = "POKUPKA"
+            sig = POK
             perc = 92
             emo = "🟢"
-            tp = p + 35
+            tp1 = p + 20
+            tp2 = p + 40
+            tp3 = p + 70
             sl = p - 18
-            desc = "Pereprodan - ROST"
         elif rsi < 45:
-            sig = "POKUPKA"
+            sig = POK
             perc = 82
             emo = "🟢"
-            tp = p + 30
+            tp1 = p + 15
+            tp2 = p + 35
+            tp3 = p + 60
             sl = p - 18
-            desc = "Slabost prodavcov"
         elif rsi > 70:
-            sig = "PRODAZHA"
+            sig = PRO
             perc = 92
             emo = "🔴"
-            tp = p - 35
+            tp1 = p - 20
+            tp2 = p - 40
+            tp3 = p - 70
             sl = p + 18
-            desc = "Perekuplen - PADENIE"
         elif rsi > 55:
-            sig = "PRODAZHA"
-            perc = 82
-            emo = "🔴"
-            tp = p - 30
-            sl = p + 18
-            desc = "Slabost pokupateley"
-        else:
-            sig = "BOKOVIK"
-            perc = 55
-            emo = "⚪️"
-            tp = p + 20
-            sl = p - 20
-            desc = "Nyet trenda - JDEM"
-
-        l1 = "====================\n"
-        l2 = "GOLD PRO V27 BEST\n"
-        l3 = "====================\n\n"
-        l4 = "{} {} {}%\n".format(emo, sig, perc)
-        l5 = "{}\n\n".format(desc)
-        l6 = "GOLD: {:.2f} $\n\n".format(p)
-        l7 = "INDIKATORY:\n"
-        l8 = "RSI: {:.1f}\n".format(rsi)
-        l9 = "EMA20: {:.2f}\n".format(ema20)
-        l10 = "EMA50: {:.2f}\n".format(ema50)
-        l11 = "UVERENNOST: {}%\n\n".format(perc)
-        l12 = "PLAN:\n"
-        l13 = "Vkhod: {:.2f}\n".format(p)
-        l14 = "Take: {:.2f}\n".format(tp)
-        l15 = "Stop: {:.2f}\n\n".format(sl)
-        l16 = "Time: {}\n".format(datetime.now().strftime("%H:%M %d.%m"))
-        l17 = "===================="
-
-        msg = l1+l2+l3+l4+l5+l6+l7+l8+l9+l10+l11+l12+l13+l14+l15+l16+l17
-        bot.reply_to(m, msg)
-
-    @bot.message_handler(commands=['status'])
-    def status(m):
-        bot.reply_to(m, "V27 OK {:.2f}".format(get_price()))
-
-    bot.infinity_polling(none_stop=True)
-
-if __name__ == '__main__':
-    threading.Thread(target=run_bot, daemon=True).start()
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
+            sig = PRO
+            perc =
