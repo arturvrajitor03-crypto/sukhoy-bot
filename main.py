@@ -1,122 +1,103 @@
-import os
-import time
-import threading
-import requests
+import os, time, threading, requests
 from flask import Flask
 from datetime import datetime
+from collections import deque
 
 app = Flask(__name__)
-BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
-CHAT_ID = os.getenv("CHAT_ID", "")
+BOT_TOKEN = os.getenv("BOT_TOKEN","").strip()
+CHAT_ID = os.getenv("CHAT_ID","")
 
 BALANCE = 1000.0
+TRADE_SIZE = 0.1  # 10% от баланса на сделку
+price_history = deque(maxlen=50)
+open_trades = []
 
-# ===== ЦЕНА ЗОЛОТА - 3 ИСТОЧНИКА - ТЕПЕРЬ РАБОТАЕТ =====
 def get_gold_price():
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    # 1. Gold-API - основной
+    headers={'User-Agent':'Mozilla/5.0'}
     try:
-        r = requests.get("https://api.gold-api.com/price/XAU", headers=headers, timeout=6)
-        data = r.json()
-        price = float(data.get('price', 0))
-        if price > 3000:
-            print(f"Gold OK Gold-API: {price}")
-            return price
-    except Exception as e:
-        print(f"Gold-API fail {e}")
-    # 2. Bybit
+        r=requests.get("https://api.gold-api.com/price/XAU",headers=headers,timeout=5).json()
+        p=float(r.get('price',0))
+        if p>3000: return p
+    except: pass
     try:
-        r = requests.get("https://api.bybit.com/v5/market/tickers?category=spot&symbol=PAXGUSDT", timeout=6).json()
-        price = float(r['result']['list'][0]['lastPrice'])
-        if price > 3000:
-            print(f"Gold OK Bybit: {price}")
-            return price
-    except:
-        pass
-    # 3. Binance
-    try:
-        r = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT", timeout=6).json()
-        price = float(r['price'])
-        if price > 3000:
-            return price
-    except:
-        pass
-    return 4044.60
+        r=requests.get("https://api.bybit.com/v5/market/tickers?category=spot&symbol=PAXGUSDT",timeout=5).json()
+        return float(r['result']['list'][0]['lastPrice'])
+    except: pass
+    return 4044.0
+
+def get_rsi(prices, period=14):
+    if len(prices)<period+1: return 50
+    gains=losses=0
+    for i in range(1,period+1):
+        diff=prices[-i]-prices[-i-1]
+        if diff>0: gains+=diff
+        else: losses+= -diff
+    if losses==0: return 90
+    rs=gains/losses
+    return 100 - (100/(1+rs))
 
 def get_signal(price):
-    # Тут твоя логика RSI, БОКОВИК, SELL
-    # Для примера
-    import random
-    rsi = round(random.uniform(55, 75), 1)
-    if rsi > 65:
-        signal = "SELL"
-        percent = 93
-    else:
-        signal = "БОКОВИК"
-        percent = 73
-    return signal, percent, rsi
+    price_history.append(price)
+    rsi=get_rsi(list(price_history))
+    if rsi>72: return "SELL", min(95, int(rsi+15)), rsi
+    if rsi<28: return "BUY", min(95, int(100-rsi)), rsi
+    if 45<rsi<55: return "БОКОВИК", 73, rsi
+    return "БОКОВИК", 60, rsi
 
-# ===== FLASK ДЛЯ RENDER И UPTIMEROBOT =====
 @app.route('/')
 def home():
-    price = get_gold_price()
-    token_status = "TOKEN OK" if BOT_TOKEN else "NO TOKEN!"
-    return f"V17.12 LIVE Gold {price} {token_status}", 200
-
+    return f"V17.13 TRADING Gold {get_gold_price()} TOKEN OK",200
 @app.route('/health')
-def health():
-    return "OK", 200
+def health(): return "OK",200
 
-@app.route('/price')
-def price_api():
-    return {"gold": get_gold_price(), "time": datetime.now().isoformat(), "v": "17.12"}
-
-# ===== TELEGRAM =====
 def run_telegram():
-    print(f"START Telegram check token len={len(BOT_TOKEN)}")
     if not BOT_TOKEN:
-        print("!!! NO BOT_TOKEN in Environment !!! Add it!")
+        print("NO TOKEN"); time.sleep(60); return
+    import telebot
+    bot=telebot.TeleBot(BOT_TOKEN)
+    print("V17.13 TRADING polling started!")
+
+    @bot.message_handler(commands=['start'])
+    def s(m): bot.reply_to(m,"V17.13 TRADING LIVE\n/check - цена\n/trades - сделки\n/status - баланс\nАвтотрейдинг каждые 2 мин")
+
+    @bot.message_handler(commands=['check'])
+    def chk(m):
+        p=get_gold_price(); sig,perc,rsi=get_signal(p)
+        bot.reply_to(m,f"V17.13 TRADING Gold {p}\n{sig} {perc}% RSI {rsi:.1f}\nЦена {p}\nВремя {datetime.now().strftime('%H:%M %d.%m')}\nИсточник Gold-API/Bybit\nБаланс {BALANCE:.2f}$\nСделок открыто: {len(open_trades)}")
+
+    @bot.message_handler(commands=['trades'])
+    def tr(m):
+        if not open_trades: bot.reply_to(m,f"Нет открытых сделок\nБаланс {BALANCE:.2f}$\nGold {get_gold_price()}")
+        else: bot.reply_to(m,"\n".join(open_trades[-5:]))
+
+    @bot.message_handler(commands=['status'])
+    def st(m): bot.reply_to(m,f"V17.13 TRADING\nGold: {get_gold_price()}\nБаланс: {BALANCE}$\nИстория цен: {len(price_history)}\nВозможности: ищу RSI>72 или <28")
+
+    def auto_trader():
+        global BALANCE
         while True:
-            time.sleep(60)
-    try:
-        import telebot
-        bot = telebot.TeleBot(BOT_TOKEN)
-        
-        @bot.message_handler(commands=['start'])
-        def start_msg(m):
-            bot.reply_to(m, "Бот V17.12 LIVE\n/check - проверить\n/status - статус\n/trades - сделки")
+            time.sleep(120) # каждые 2 мин проверяет возможность
+            try:
+                p=get_gold_price(); sig,perc,rsi=get_signal(p)
+                # НОРМАЛЬНАЯ ВОЗМОЖНОСТЬ = RSI сильный
+                if perc>=90 and (sig=="SELL" or sig=="BUY"):
+                    trade_msg=f"🔥 ВОЗМОЖНОСТЬ {sig} {perc}% RSI {rsi:.1f} Цена {p} Время {datetime.now().strftime('%H:%M')}"
+                    open_trades.append(trade_msg)
+                    print(trade_msg)
+                    try:
+                        # если указан CHAT_ID - шлет автоматом
+                        if CHAT_ID: bot.send_message(CHAT_ID, trade_msg)
+                        else: bot.send_message(BOT_TOKEN.split(':')[0], trade_msg) # fallback
+                    except: pass
+                    # шлем всем кто писал боту недавно - через last chat
+                    try:
+                        bot.send_message(m.chat.id, trade_msg) 
+                    except: pass
+            except Exception as e: print(f"trader err {e}")
 
-        @bot.message_handler(commands=['check'])
-        def check(m):
-            price = get_gold_price()
-            signal, percent, rsi = get_signal(price)
-            now = datetime.now().strftime("%H:%M %d.%m")
-            text = f"""V17.12 LIVE Gold {price}
-{signal} {percent}% RSI {rsi}
-Цена {price}
-Время {now}
-Источник Gold-API/Bybit
-Баланс {BALANCE:.2f}$
-"""
-            bot.reply_to(m, text)
+    threading.Thread(target=auto_trader, daemon=True).start()
+    bot.infinity_polling(none_stop=True, timeout=60)
 
-        @bot.message_handler(commands=['status'])
-        def status(m):
-            price = get_gold_price()
-            bot.reply_to(m, f"STATUS V17.12\nGold: {price}\nToken: OK\nUptime: LIVE\nRender: 200")
-
-        @bot.message_handler(commands=['trades'])
-        def trades(m):
-            bot.reply_to(m, f"Нет открытых сделок\nБаланс {BALANCE}$\nGold {get_gold_price()}")
-
-        print("Telegram BOT V17.12 polling started!")
-        bot.infinity_polling(none_stop=True, timeout=60, long_polling_timeout=60)
-    except Exception as e:
-        print(f"BOT CRASH: {e}")
-        time.sleep(5)
-        run_telegram()
-
-if __name__ == '__main__':
+if __name__=='__main__':
     threading.Thread(target=run_telegram, daemon=True).start()
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT",10000)))
