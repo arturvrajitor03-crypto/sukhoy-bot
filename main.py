@@ -17,7 +17,7 @@ def get_price():
 
 @app.route('/')
 def home():
-    return "V21 BEAUTY Gold {} TOKEN OK".format(get_price()), 200
+    return "V22 BEAUTY RU Gold {} ".format(get_price()), 200
 
 @app.route('/health')
 def health():
@@ -29,11 +29,11 @@ def run_bot():
         return
     import telebot
     bot = telebot.TeleBot(BOT_TOKEN)
-    print("V21 BEAUTY started")
+    print("V22 BEAUTY RU started")
 
     @bot.message_handler(commands=['start'])
     def start(m):
-        txt = "GOLD PRO V21 BEAUTY\n\n/check - tochniy analiz\n/status - balans\n/trades - signaly"
+        txt = "GOLD BOT V22\n\n/check - proverka\n/status - balans"
         bot.reply_to(m, txt)
 
     @bot.message_handler(commands=['check'])
@@ -61,48 +61,50 @@ def run_bot():
         if rsi < 32:
             sig = "BUY"
             perc = 90
+            emo = "🟢"
+            action = "POKUPAT"
+            tp = p + 30
+            sl = p - 20
         elif rsi > 68:
             sig = "SELL"
             perc = 90
-        else:
-            sig = "WAIT"
-            perc = 60
-
-        if sig == "BUY":
-            tp = p + 30
-            sl = p - 20
-            emo = "BUY"
-        elif sig == "SELL":
+            emo = "🔴"
+            action = "PRODAVAT"
             tp = p - 30
             sl = p + 20
-            emo = "SELL"
         else:
+            sig = "BOKOVIK"
+            perc = 60
+            emo = "⚪️"
+            action = "JDAT"
             tp = p
             sl = p
-            emo = "WAIT"
 
-        line1 = "GOLD PRO V21 - {}\n".format(emo)
-        line2 = "Signal: {} {}%\n".format(sig, perc)
-        line3 = "Price: {:.2f} $\n".format(p)
-        line4 = "RSI: {:.1f}\n".format(rsi)
-        line5 = "EMA: {:.2f}\n".format(sum(list(price_history)[-20:])/20 if len(price_history)>=20 else p)
-        line6 = "Entry: {:.2f}\n".format(p)
-        line7 = "TP: {:.2f} (+30)\n".format(tp)
-        line8 = "SL: {:.2f} (-20)\n".format(sl)
-        line9 = "Time: {}\n".format(datetime.now().strftime("%H:%M %d.%m"))
-        line10 = "Balance: 1000 $"
+        ema_val = sum(list(price_history)[-20:])/20 if len(price_history)>=20 else p
 
-        msg = line1 + line2 + line3 + line4 + line5 + line6 + line7 + line8 + line9 + line10
+        a1 = "🔰 GOLD PRO V22\n\n"
+        a2 = "{} SIGNAL: {} {}\n".format(emo, sig, perc)
+        a3 = "💬 Deistvie: {}\n\n".format(action)
+        a4 = "💰 Tsena:\n{:.2f} $\n\n".format(p)
+        a5 = "📊 Indikatory:\n"
+        a6 = "├ RSI: {:.1f}\n".format(rsi)
+        a7 = "├ EMA20: {:.2f} $\n".format(ema_val)
+        a8 = "└ Uverennost: {}%\n\n".format(perc)
+        a9 = "🎯 Plan:\n"
+        a10 = "├ Vkhod: {:.2f} $\n".format(p)
+        a11 = "├ TP: {:.2f} $ (+30)\n".format(tp)
+        a12 = "└ SL: {:.2f} $ (-20)\n\n".format(sl)
+        a13 = "⏰ Vremya: {}\n".format(datetime.now().strftime("%H:%M %d.%m"))
+        a14 = "💼 Balans: 1000.00 $\n"
+        a15 = "🔗 Gold-API / Bybit"
+
+        msg = a1+a2+a3+a4+a5+a6+a7+a8+a9+a10+a11+a12+a13+a14+a15
         bot.reply_to(m, msg)
 
     @bot.message_handler(commands=['status'])
     def status(m):
-        msg = "STATUS V21\nPrice: {:.2f}\nHistory: {}\nMode: RSI PRO 90%".format(get_price(), len(price_history))
+        msg = "STATUS V22\nPrice: {:.2f}\nHistory: {}".format(get_price(), len(price_history))
         bot.reply_to(m, msg)
-
-    @bot.message_handler(commands=['trades'])
-    def trades(m):
-        bot.reply_to(m, "Trades: waiting for 90% signal\nPrice: {:.2f}".format(get_price()))
 
     bot.infinity_polling(none_stop=True)
 
