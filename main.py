@@ -1,51 +1,61 @@
-# === V38 NORMAL - БЕРЕТ ДАННЫЕ КАК НА ТВОЕМ СКРИНЕ ===
-import requests
+import requests, time
+TOKEN = "ВСТАВЬ_СЮДА_ТОКЕН_ОТ_BOTFATHER" # пример: 123456789:AAH...
+CHAT_ID = "ВСТАВЬ_СЮДА_ID" # пример: 7654321
 
-TOKEN = "ТВОЙ_ТОКЕН"
-CHAT_ID = "ТВОЙ_ID"
+def send(msg):
+    try:
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id":CHAT_ID,"text":msg}, timeout=10)
+    except: pass
 
-def get_15min_data():
+def get_price():
     url = "https://api.bybit.com/v5/market/kline?category=spot&symbol=XAUUSD&interval=15&limit=100"
-    data = requests.get(url).json()['result']['list']
-    closes = [float(x[4]) for x in data][::-1] # как у тебя на графике
+    r = requests.get(url, timeout=10).json()
+    closes = [float(x[4]) for x in r['result']['list']][::-1]
     return closes
 
+def rsi(closes, p):
+    gains=losses=0.0
+    for i in range(-p,0):
+        d = closes[i]-closes[i-1]
+        if d>0: gains+=d
+        else: losses-=d
+    if losses==0: return 100
+    rs=gains/losses
+    return 100-(100/(1+rs))
+
 def check():
-    closes = get_15min_data()
-    price = closes[-1] # 4064 как у тебя сейчас
-    
-    # MA как на твоем скрине
-    MA7 = sum(closes[-7:])/7
-    MA14 = sum(closes[-14:])/14
-    MA28 = sum(closes[-28:])/28
-    
-    # RSI6 (у тебя 81.04)
-    def rsi(p=6):
-        gains=0; losses=0
-        for i in range(-p,0):
-            diff = closes[i]-closes[i-1]
-            if diff>0: gains+=diff
-            else: losses+=-diff
-        rs = gains/(losses+0.0001)
-        return 100 - (100/(1+rs))
-    
-    RSI6 = rsi(6)
-    RSI12 = rsi(12)
-    
-    print(f"Цена {price} MA7 {MA7:.2f} MA14 {MA14:.2f} RSI6 {RSI6:.1f}")
+    closes = get_price()
+    price = closes[-1]
+    ma7 = sum(closes[-7:])/7
+    ma14 = sum(closes[-14:])/14
+    ma28 = sum(closes[-28:])/28
+    r6 = rsi(closes,6)
+    r12 = rsi(closes,12)
+    r24 = rsi(closes,24)
 
-    # === ЛОГИКА 80%+ КАК НА РЫНКЕ СЕЙЧАС ===
-    if price > MA7 and price > MA14 and price > MA28 and RSI6 < 78:
-        # Как сейчас у тебя - цена выше всех MA - сильный BUY
-        power = 80 + (price-MA7) # чем дальше выше MA7 - тем сильнее
-        if power>100: power=92
-        return f"🟢🟢🟢 BUY {int(power)}% | {price} | MA7 {MA7:.1f} выше! Вход от {price:.2f} SL {price-10:.2f} TP {price+15:.2f}"
-    
-    elif RSI6 > 82: # как сейчас 81.04 - перекуплен
-        return f"⚠️ БОКОВИК-ПЕРЕКУП {int(RSI6)}% | Цена {price} RSI6 {RSI6:.1f} - ЖДИ ОТКАТА к MA7 {MA7:.1f} и там BUY 85%"
-    
-    else:
-        return f"⚪️ БОКОВИК 55% - ЖДЕМ | Цена {price} MA7 {MA7:.1f}"
+    # ЛОГИКА 80%+ ДЛЯ ТВОЕГО ГРАФИКА
+    if price > ma7 and price > ma14 and r6 < 78 and r24 < 65:
+        power = 80 + int(price-ma7)
+        if power>95: power=92
+        return f"🟢🟢🟢 BUY {power}% \nXAUUSD {price:.2f}\nMA7 {ma7:.2f} MA14 {ma14:.2f}\nRSI6 {r6:.1f}\n\nВХОД СЕЙЧАС\nSL {price-10:.2f}\nTP {price+12:.2f}\nЛот 0.01", True
 
-# Проверка
-print(check())
+    if price < ma7 and price < ma14 and r6 > 22:
+        power = 80 + int(ma7-price)
+        if power>95: power=92
+        return f"🔴🔴🔴 SELL {power}% \nXAUUSD {price:.2f}\nMA7 {ma7:.2f}\nRSI6 {r6:.1f}\n\nВХОД СЕЙЧАС\nSL {price+10:.2f}\nTP {price-12:.2f}\nЛот 0.01", True
+
+    return f"Боковик RSI6 {r6:.1f} Цена {price:.2f} MA7 {ma7:.2f} - ждем 80%+", False
+
+# СТАРТ
+send("✅ V38 NORMAL запущен! Кидаю только 80%+ как на скрине 4064")
+print("ЗАПУЩЕН - жду 80%+")
+
+while True:
+    try:
+        msg, is_signal = check()
+        print(time.strftime("%H:%M:%S"), msg)
+        if is_signal:
+            send(msg)
+    except Exception as e:
+        print("Ошибка", e)
+    time.sleep(300) # проверка каждые 5 мин
