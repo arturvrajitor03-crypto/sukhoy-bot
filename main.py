@@ -13,7 +13,7 @@ app = Flask(__name__)
 
 def get_data():
     try:
-        url = "https://api.binance.com/api/v3/klines"
+        url = "http://data-api.binance.vision"
         params = {"symbol": "PAXGUSDT", "interval": "15m", "limit": 200}
         r = requests.get(url, timeout=10)
         data = r.json()
