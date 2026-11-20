@@ -1,7 +1,7 @@
 import requests, os
 from flask import Flask, request
 
-TOKEN = "9241841874:AAEzhDrKaYVetMgcyRjq3ywK2YQS0RaRib4
+TOKEN ="9241841874:AAEzhDrKaYVetMgcyRjq3ywK2YQS0RaRib4
 CHAT_ID = "813103573"
 RENDER_URL = "https://sukhoy-bot.onrender.com"
 
