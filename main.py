@@ -1,6 +1,6 @@
 import requests
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext
 
 TOKEN = "9241841874:AAEzhDrKaYVetMgcyRjq3ywK2YQS0RaRib4"
 
@@ -26,12 +26,7 @@ def get_gold_signal():
 
         avg_gain = sum(gains[-14:]) / 14 if len(gains) >= 14 else 1
         avg_loss = sum(losses[-14:]) / 14 if len(losses) >= 14 else 1
-        if avg_loss == 0:
-            rsi = 100
-        else:
-            rs = avg_gain / avg_loss
-            rsi = 100 - (100 / (1 + rs))
-
+        rsi = 100 if avg_loss == 0 else 100 - (100 / (1 + avg_gain / avg_loss))
         ma20 = sum(closes[-20:]) / min(20, len(closes))
 
         score = 0
@@ -58,12 +53,7 @@ def get_gold_signal():
             signal = "WAIT 🟡 ЖДАТЬ"
             strength = 3
 
-        if strength >= 7:
-            strength_text = "СИЛЬНЫЙ 💪"
-        elif strength >= 5:
-            strength_text = "СРЕДНИЙ 👍"
-        else:
-            strength_text = "СЛАБЫЙ 👎"
+        strength_text = "СИЛЬНЫЙ 💪" if strength >= 7 else "СРЕДНИЙ 👍" if strength >= 5 else "СЛАБЫЙ 👎"
 
         return f"""🥇 ЗОЛОТО XAU/USD
 
@@ -81,33 +71,35 @@ def get_gold_signal():
     except Exception as e:
         return f"Ошибка: {e}"
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def start(update: Update, context: CallbackContext):
     keyboard = [
         [InlineKeyboardButton("🥇 Сигнал по Золоту", callback_data="gold")],
         [InlineKeyboardButton("🔥 Попробуйте Бесплатно", callback_data="trial")]
     ]
-    await update.message.reply_text("НОВЫЙ БОТ ДЛЯ ПРОБИВА\n\nВыбери:", reply_markup=InlineKeyboardMarkup(keyboard))
+    update.message.reply_text("НОВЫЙ БОТ ДЛЯ ПРОБИВА\n\nВыбери:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def button(update: Update, context: CallbackContext):
     query = update.callback_query
-    await query.answer()
+    query.answer()
     if query.data == "gold":
-        await query.message.reply_text("⏳ Считаю сигнал по золоту...")
-        await query.message.reply_text(get_gold_signal())
+        query.message.reply_text("⏳ Считаю сигнал по золоту...")
+        query.message.reply_text(get_gold_signal())
     elif query.data == "trial":
-        await query.message.reply_text("Бесплатная проба активирована ✅")
+        query.message.reply_text("Бесплатная проба активирована ✅")
 
-async def gold_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("⏳ Считаю сигнал по золоту...")
-    await update.message.reply_text(get_gold_signal())
+def gold_cmd(update: Update, context: CallbackContext):
+    update.message.reply_text("⏳ Считаю сигнал по золоту...")
+    update.message.reply_text(get_gold_signal())
 
 def main():
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("gold", gold_cmd))
-    app.add_handler(CallbackQueryHandler(button))
+    updater = Updater(TOKEN, use_context=True)
+    dp = updater.dispatcher
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CommandHandler("gold", gold_cmd))
+    dp.add_handler(CallbackQueryHandler(button))
     print("Bot started...")
-    app.run_polling()
+    updater.start_polling()
+    updater.idle()
 
 if __name__ == "__main__":
     main()
