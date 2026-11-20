@@ -1,98 +1,127 @@
-import os, requests, threading, time
+import os
+import yfinance as yf
+import pandas as pd
+import numpy as np
 from flask import Flask, request
+import telebot
 
-TOKEN = os.getenv("BOT_TOKEN", "")
-API = f"https://api.telegram.org/bot{TOKEN}"
+TOKEN = os.environ.get("BOT_TOKEN")
+APP_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://sukhoy-bot.onrender.com")
+
+bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
-active = {}
 
-def send(chat_id, text):
-    try:
-        requests.post(f"{API}/sendMessage", json={"chat_id": chat_id, "text": text}, timeout=10)
-    except: pass
-
-def get_price():
-    try:
-        r = requests.get("https://data-asg.goldprice.org/dbXRates/USD", timeout=10).json()
-        return float(r['items'][0]['xauPrice'])
-    except:
+def get_data():
+    # Берем 15м свечи за последние 5 дней
+    df = yf.download("GC=F", period="5d", interval="15m", progress=False)
+    if df.empty:
         return None
+    # yfinance иногда возвращает MultiIndex
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    df = df.dropna()
+    return df
+
+def calc_rsi(close, period=14):
+    delta = close.diff()
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
+    avg_gain = gain.rolling(period).mean()
+    avg_loss = loss.rolling(period).mean()
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi.iloc[-1]
 
 def get_signal():
-    price = get_price()
-    if not price: return None
-    rsi = 72 if price > 3570 else 28
-    direction = "SELL" if rsi > 60 else "BUY"
-    if direction == "SELL":
-        return {"dir": direction, "entry": price, "sl": price + 12, "tp1": price - 8, "tp2": price - 16, "tp3": price - 25, "rsi": rsi}
+    df = get_data()
+    if df is None or len(df) < 60:
+        return None
+
+    close = df['Close']
+    price = float(close.iloc[-1])
+
+    # EMA 50 - главный фильтр как на твоем графике
+    ema50 = close.ewm(span=50, adjust=False).mean().iloc[-1]
+    rsi = calc_rsi(close)
+
+    # Fib от последних 50 свечей
+    last_50 = df.tail(50)
+    high = float(last_50['High'].max())
+    low = float(last_50['Low'].min())
+    diff = high - low
+    fib_618 = high - diff * 0.618
+    fib_382 = high - diff * 0.382
+    fib_236 = high - diff * 0.236
+
+    # ЛОГИКА - не угадываем, а смотрим тренд
+    if price < ema50:
+        # Тренд вниз - только SELL
+        direction = "SELL"
+        emoji = "🔴"
+        entry = price
+        stop = round(fib_382, 2) if fib_382 > price else round(price + 18, 2)
+        tp1 = round(fib_236, 2)
+        tp2 = round(low, 2)
+        tp3 = round(low - 10, 2)
+        reason = f"Цена под EMA50 ({ema50:.1f}) - тренд вниз"
     else:
-        return {"dir": direction, "entry": price, "sl": price - 12, "tp1": price + 8, "tp2": price + 16, "tp3": price + 25, "rsi": rsi}
+        # Тренд вверх - только BUY
+        direction = "BUY"
+        emoji = "🟢"
+        entry = price
+        stop = round(fib_618, 2) if fib_618 < price else round(price - 18, 2)
+        tp1 = round(fib_382, 2)
+        tp2 = round(high, 2)
+        tp3 = round(high + 10, 2)
+        reason = f"Цена над EMA50 ({ema50:.1f}) - тренд вверх"
 
-def checker():
-    while True:
-        time.sleep(30)
-        if not active: continue
-        price = get_price()
-        if not price: continue
-        for chat_id, s in list(active.items()):
-            done = False
-            msg = ""
-            if s['dir'] == "SELL":
-                if price <= s['tp1'] and not s.get('tp1_done'):
-                    s['tp1_done'] = True
-                    msg = f"✅ ЦЕЛЬ 1 ПРОШЛА!\nЦена: {price}\nЦель была: {s['tp1']}"
-                elif price <= s['tp2'] and s.get('tp1_done') and not s.get('tp2_done'):
-                    s['tp2_done'] = True
-                    msg = f"✅✅ ЦЕЛЬ 2 ПРОШЛА!\nЦена: {price}"
-                elif price <= s['tp3'] and s.get('tp2_done') and not s.get('tp3_done'):
-                    msg = f"✅✅✅ ЦЕЛЬ 3 ПРОШЛА! ВСЕ ЦЕЛИ ВЗЯТЫ!\nЦена: {price}"
-                    done = True
-                elif price >= s['sl']:
-                    msg = f"❌ СТОП СРАБОТАЛ\nЦена: {price}"
-                    done = True
-            else:
-                if price >= s['tp1'] and not s.get('tp1_done'):
-                    s['tp1_done'] = True
-                    msg = f"✅ ЦЕЛЬ 1 ПРОШЛА!\nЦена: {price}\nЦель была: {s['tp1']}"
-                elif price >= s['tp2'] and s.get('tp1_done') and not s.get('tp2_done'):
-                    s['tp2_done'] = True
-                    msg = f"✅✅ ЦЕЛЬ 2 ПРОШЛА!\nЦена: {price}"
-                elif price >= s['tp3'] and s.get('tp2_done') and not s.get('tp3_done'):
-                    msg = f"✅✅✅ ЦЕЛЬ 3 ПРОШЛА! ВСЕ ЦЕЛИ ВЗЯТЫ!\nЦена: {price}"
-                    done = True
-                elif price <= s['sl']:
-                    msg = f"❌ СТОП СРАБОТАЛ\nЦена: {price}"
-                    done = True
-            if msg: send(chat_id, msg)
-            if done: del active[chat_id]
+    strength = min(95, max(55, int(abs(price - ema50) / 2 + 60)))
 
-threading.Thread(target=checker, daemon=True).start()
+    text = (
+        f"👑 СУХОЙ - XAUUSD - {emoji} {direction}\n\n"
+        f"💰 Цена: {price:.2f}\n"
+        f"📊 RSI: {rsi:.0f} | EMA50: {ema50:.1f} | Сила: {strength}%\n"
+        f"📈 {reason}\n"
+        f"Fib 0.618: {fib_618:.1f} | Fib 0.382: {fib_382:.1f}\n\n"
+        f"Вход: {entry:.2f}\n"
+        f"СТОП: {stop:.2f}\n"
+        f"ЦЕЛЬ 1: {tp1:.2f}\n"
+        f"ЦЕЛЬ 2: {tp2:.2f}\n"
+        f"ЦЕЛЬ 3: {tp3:.2f}"
+    )
+    return text
 
-@app.route("/", methods=["POST"])
-def webhook():
-    data = request.json
-    if not data or "message" not in data: return "ok"
-    msg = data["message"]
-    chat_id = msg["chat"]["id"]
-    text = msg.get("text", "")
-    if text == "/start":
-        send(chat_id, "👑 СУХОЙ - СИГНАЛЫ ЗОЛОТО\n/check - сигнал\n/price - цена")
-    elif text == "/check":
-        s = get_signal()
-        if not s:
-            send(chat_id, "Ошибка цены, попробуй еще раз")
-            return "ok"
-        active[chat_id] = s
-        emoji = "🔴" if s['dir'] == "SELL" else "🟢"
-        send(chat_id, f"👑 СУХОЙ - XAUUSD - {emoji} {s['dir']}\n\n💰 Цена: {s['entry']}\n📊 RSI: {s['rsi']}\n\nВход: {s['entry']}\nСТОП: {s['sl']}\nЦЕЛЬ 1: {s['tp1']}\nЦЕЛЬ 2: {s['tp2']}\nЦЕЛЬ 3: {s['tp3']}\n\nЯ слежу, пришлю ✅ когда цель пройдет")
-    elif text == "/price":
-        p = get_price()
-        send(chat_id, f"💰 Цена золота: {p}" if p else "Ошибка")
-    return "ok"
+@bot.message_handler(commands=['start'])
+def start(message):
+    bot.reply_to(message, "👑 Сухой Бот работает!\nНапиши /check для сигнала XAUUSD")
+
+@bot.message_handler(commands=['check'])
+def check(message):
+    bot.reply_to(message, "⏳ Считаю EMA + RSI + Fib...")
+    sig = get_signal()
+    if sig:
+        bot.reply_to(message, sig)
+    else:
+        bot.reply_to(message, "❌ Нет данных, попробуй через минуту")
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Bot is alive!"
+    return "Bot is alive!", 200
+
+@app.route(f"/{TOKEN}", methods=["POST"])
+def webhook():
+    json_str = request.get_data().decode("UTF-8")
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return "OK", 200
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    # Ставим webhook при старте
+    try:
+        bot.remove_webhook()
+        bot.set_webhook(url=f"{APP_URL}/{TOKEN}")
+        print("Webhook set!")
+    except Exception as e:
+        print(f"Webhook error: {e}")
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
