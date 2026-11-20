@@ -1,5 +1,5 @@
 import os
-import yfinance as yf
+import requests
 import pandas as pd
 import numpy as np
 from flask import Flask, request
@@ -12,15 +12,23 @@ bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 def get_data():
-    # Берем 15м свечи за последние 5 дней
-    df = yf.download("GC=F", period="5d", interval="15m", progress=False)
-    if df.empty:
+    try:
+        url = "https://api.binance.com/api/v3/klines"
+        params = {"symbol": "PAXGUSDT", "interval": "15m", "limit": 200}
+        r = requests.get(url, timeout=10)
+        data = r.json()
+        if not data or isinstance(data, dict):
+            return None
+        df = pd.DataFrame(data, columns=[
+            "time","Open","High","Low","Close","Volume",
+            "close_time","qav","trades","tb_base","tb_quote","ignore"
+        ])
+        for col in ["Open","High","Low","Close","Volume"]:
+            df[col] = df[col].astype(float)
+        return df
+    except Exception as e:
+        print(f"Data error: {e}")
         return None
-    # yfinance иногда возвращает MultiIndex
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-    df = df.dropna()
-    return df
 
 def calc_rsi(close, period=14):
     delta = close.diff()
@@ -36,15 +44,10 @@ def get_signal():
     df = get_data()
     if df is None or len(df) < 60:
         return None
-
     close = df['Close']
     price = float(close.iloc[-1])
-
-    # EMA 50 - главный фильтр как на твоем графике
     ema50 = close.ewm(span=50, adjust=False).mean().iloc[-1]
     rsi = calc_rsi(close)
-
-    # Fib от последних 50 свечей
     last_50 = df.tail(50)
     high = float(last_50['High'].max())
     low = float(last_50['Low'].min())
@@ -52,10 +55,7 @@ def get_signal():
     fib_618 = high - diff * 0.618
     fib_382 = high - diff * 0.382
     fib_236 = high - diff * 0.236
-
-    # ЛОГИКА - не угадываем, а смотрим тренд
     if price < ema50:
-        # Тренд вниз - только SELL
         direction = "SELL"
         emoji = "🔴"
         entry = price
@@ -65,7 +65,6 @@ def get_signal():
         tp3 = round(low - 10, 2)
         reason = f"Цена под EMA50 ({ema50:.1f}) - тренд вниз"
     else:
-        # Тренд вверх - только BUY
         direction = "BUY"
         emoji = "🟢"
         entry = price
@@ -74,9 +73,7 @@ def get_signal():
         tp2 = round(high, 2)
         tp3 = round(high + 10, 2)
         reason = f"Цена над EMA50 ({ema50:.1f}) - тренд вверх"
-
     strength = min(95, max(55, int(abs(price - ema50) / 2 + 60)))
-
     text = (
         f"👑 СУХОЙ - XAUUSD - {emoji} {direction}\n\n"
         f"💰 Цена: {price:.2f}\n"
@@ -116,7 +113,6 @@ def webhook():
     return "OK", 200
 
 if __name__ == "__main__":
-    # Ставим webhook при старте
     try:
         bot.remove_webhook()
         bot.set_webhook(url=f"{APP_URL}/{TOKEN}")
