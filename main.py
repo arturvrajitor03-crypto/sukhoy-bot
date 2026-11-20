@@ -1,64 +1,66 @@
-import os, threading, requests, random
-from flask import Flask
+import os, requests, threading, time
+from flask import Flask, request
 
 TOKEN = os.getenv("BOT_TOKEN", "")
+API = f"https://api.telegram.org/bot{TOKEN}"
 app = Flask(__name__)
 
-@app.route('/')
-def home():
-    return "Bot is alive!"
-
-def run_web():
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
-threading.Thread(target=run_web, daemon=True).start()
-
-def get_gold():
-    try:
-        r = requests.get("https://api.gold-api.com/price/XAU", timeout=5).json()
-        p = float(r.get("price", 0))
-        if p > 1000:
-            return p
-    except:
-        pass
-    return round(random.uniform(4100, 4130), 2)
+# активные сигналы: {chat_id: {вход, стоп, цели, направление}}
+active = {}
 
 def send(chat_id, text):
-    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"}, timeout=10)
-
-offset = 0
-while True:
     try:
-        r = requests.get(f"https://api.telegram.org/bot{TOKEN}/getUpdates?offset={offset}&timeout=30", timeout=35).json()
-        for u in r.get("result", []):
-            offset = u["update_id"] + 1
-            if "message" not in u or "text" not in u["message"]:
-                continue
-            chat_id = u["message"]["chat"]["id"]
-            text = u["message"]["text"].strip()
+        requests.post(f"{API}/sendMessage", json={"chat_id": chat_id, "text": text}, timeout=10)
+    except: pass
 
-            if text == "/start":
-                send(chat_id, "👑 <b>СУХОЙ - СИГНАЛЫ ЗОЛОТО</b>\n\n/check - сигнал BUY / SELL\n/price - цена золота")
+def get_price():
+    try:
+        # цена золота
+        r = requests.get("https://data-asg.goldprice.org/dbXRates/USD", timeout=10).json()
+        return float(r['items'][0]['curr'] + r['items'][0]['xauPrice'])
+    except:
+        return None
 
-            elif text in ["/check", "/sniper", "/dry"]:
-                price = get_gold()
-                rsi = random.randint(25, 75)
-                power = random.randint(65, 92)
-                if rsi >= 60:
-                    sig = "🔴 SELL"
-                    sl = round(price + 12)
-                    tp1 = round(price - 8)
-                    tp2 = round(price - 16)
-                    tp3 = round(price - 25)
-                else:
-                    sig = "🟢 BUY"
-                    sl = round(price - 12)
-                    tp1 = round(price + 8)
-                    tp2 = round(price + 16)
-                    tp3 = round(price + 25)
+def get_signal():
+    price = get_price()
+    if not price: return None
+    # простая логика RSI-подобная для примера
+    import random
+    # берем из цены - если последняя цифра четная SELL, нечет BUY (для теста логики)
+    # в реальном боте тут твоя старая логика RSI
+    rsi = 72 if price > 3570 else 28
+    direction = "SELL" if rsi > 60 else "BUY"
+    if direction == "SELL":
+        return {"dir": direction, "entry": price, "sl": price + 12, "tp1": price - 8, "tp2": price - 16, "tp3": price - 25, "rsi": rsi}
+    else:
+        return {"dir": direction, "entry": price, "sl": price - 12, "tp1": price + 8, "tp2": price + 16, "tp3": price + 25, "rsi": rsi}
 
-                send(chat_id, f"👑 <b>СУХОЙ - XAUUSD - {sig}</b>\n\n💰 Цена: <b>{price}</b>\n📊 RSI: {rsi} | Сила: {power}%\n\nВход: {price}\nСТОП: {sl}\nЦЕЛЬ 1: {tp1}\nЦЕЛЬ 2: {tp2}\nЦЕЛЬ 3: {tp3}")
-
-            elif text == "/price":
-                send(chat_id, f"💰 <b>ЗОЛОТО: {get_gold()}$</b>")
-    except Exception as e:
-        print("ERR", e)
+def checker():
+    while True:
+        time.sleep(30)
+        if not active: continue
+        price = get_price()
+        if not price: continue
+        for chat_id, s in list(active.items()):
+            done = False
+            msg = ""
+            if s['dir'] == "SELL":
+                if price <= s['tp1'] and not s.get('tp1_done'):
+                    s['tp1_done'] = True
+                    msg = f"✅ ЦЕЛЬ 1 ПРОШЛА!\nЦена: {price}\nЦель была: {s['tp1']}\nЗакрывай часть сделки!"
+                elif price <= s['tp2'] and s.get('tp1_done') and not s.get('tp2_done'):
+                    s['tp2_done'] = True
+                    msg = f"✅✅ ЦЕЛЬ 2 ПРОШЛА!\nЦена: {price}\nЦель была: {s['tp2']}"
+                elif price <= s['tp3'] and s.get('tp2_done') and not s.get('tp3_done'):
+                    msg = f"✅✅✅ ЦЕЛЬ 3 ПРОШЛА! ВСЕ ЦЕЛИ ВЗЯТЫ!\nЦена: {price}"
+                    done = True
+                elif price >= s['sl']:
+                    msg = f"❌ СТОП СРАБОТАЛ\nЦена: {price}\nСтоп был: {s['sl']}"
+                    done = True
+            else: # BUY
+                if price >= s['tp1'] and not s.get('tp1_done'):
+                    s['tp1_done'] = True
+                    msg = f"✅ ЦЕЛЬ 1 ПРОШЛА!\nЦена: {price}\nЦель была: {s['tp1']}\nЗакрывай часть сделки!"
+                elif price >= s['tp2'] and s.get('tp1_done') and not s.get('tp2_done'):
+                    s['tp2_done'] = True
+                    msg = f"✅✅ ЦЕЛЬ 2 ПРОШЛА!\nЦена: {price}\nЦель была: {s['tp2']
