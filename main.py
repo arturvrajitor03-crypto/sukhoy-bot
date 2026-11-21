@@ -1,66 +1,83 @@
+import os
+import io
+import requests
+import pandas as pd
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont
+from flask import Flask, request
+import telebot
 
-def make_chart(df, ema_series, direction, entry, stop, tp1, tp2, tp3):
+TOKEN = os.environ.get("BOT_TOKEN")
+APP_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://sukhoy-bot.onrender.com")
+
+bot = telebot.TeleBot(TOKEN)
+app = Flask(__name__)
+
+def get_data():
+    try:
+        url = "https://data-api.binance.vision/api/v3/klines"
+        params = {"symbol": "PAXGUSDT", "interval": "15m", "limit": 200}
+        r = requests.get(url, params=params, timeout=10)
+        data = r.json()
+        if not data or isinstance(data, dict):
+            return None
+        df = pd.DataFrame(data, columns=[
+            "time","Open","High","Low","Close","Volume",
+            "close_time","qav","trades","tb_base","tb_quote","ignore"
+        ])
+        for col in ["Open","High","Low","Close","Volume"]:
+            df[col] = df[col].astype(float)
+        return df
+    except Exception as e:
+        print(f"Data error: {e}")
+        return None
+
+def calc_rsi(close, period=14):
+    delta = close.diff()
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
+    avg_gain = gain.rolling(period).mean()
+    avg_loss = loss.rolling(period).mean()
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi.iloc[-1]
+
+def make_chart(df, ema_series, direction, entry, stop, tp1, tp2, tp3, price, rsi, ema50, strength):
     W, H = 1080, 1920
-    img = Image.new('RGB', (W, H), (10, 10, 12))
+    img = Image.new('RGB', (W, H), (12, 12, 14))
     draw = ImageDraw.Draw(img)
 
-    # Золотая рамка - внешняя
-    for i in range(12):
-        draw.rectangle([30+i, 280+i, W-30-i, H-120-i], outline=(212,175,55))
+    # --- Шрифты ---
+    def font(size, bold=True):
+        try:
+            name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
+            return ImageFont.truetype(name, size)
+        except:
+            return ImageFont.load_default()
+
+    f_top = font(48, True)
+    f_sukhoy = font(110, True)
+    f_arrow = font(260, True)
+    f_dir = font(72, True)
+    f_line = font(62, True)
+    f_small = font(38, True)
+    f_price = font(52, True)
+
+    GOLD = (212, 175, 55)
+    GOLD_DARK = (180, 140, 40)
+    WHITE = (245, 245, 245)
+    BLACK = (0, 0, 0)
+
+    # --- Золотая рамка внешняя ---
+    for i in range(10):
+        draw.rectangle([28+i, 280+i, W-28-i, H-110-i], outline=GOLD, width=1)
+    # Тонкая внутренняя
+    draw.rectangle([48, 300, W-48, H-130], outline=GOLD_DARK, width=2)
     # Белый центр
-    draw.rectangle([90, 340, W-90, H-180], fill=(245, 245, 245))
+    draw.rectangle([85, 335, W-85, H-165], fill=WHITE)
 
-    # Заголовок
-    try:
-        f_title = ImageFont.truetype("DejaVuSans-Bold.ttf", 52)
-        f_big = ImageFont.truetype("DejaVuSans-Bold.ttf", 78)
-        f_num = ImageFont.truetype("DejaVuSans-Bold.ttf", 68)
-    except:
-        f_title = ImageFont.load_default()
-        f_big = f_title
-        f_num = f_title
+    # --- Верх ---
+    draw.text((W//2, 110), "👑  СУХОЙ  •  XAUUSD  👑", fill=GOLD, font=f_top, anchor="mm")
+    draw.text((85, 210), "СУХОЙ", fill=GOLD, font=f_sukhoy, anchor="la")
 
-    draw.text((W//2, 120), "👑 СУХОЙ • XAUUSD 👑", fill=(212,175,55), font=f_title, anchor="mm")
-    draw.text((90, 220), "СУХОЙ", fill=(212,175,55), font=f_big, anchor="lm")
-
-    # Стрелка и направление
-    if direction == "BUY":
-        color = (0, 150, 80)
-        arrow = "▲"
-        arrow_text = "BUY"
-        entry_text = f"Вход: выше {entry:.2f}"
-    elif direction == "SELL":
-        color = (220, 20, 20)
-        arrow = "▼"
-        arrow_text = "SELL"
-        entry_text = f"Вход: ниже {entry:.2f}"
-    else:
-        color = (150, 150, 150)
-        arrow = "⏳"
-        arrow_text = "WAIT"
-        entry_text = f"Цена: {entry:.2f}"
-
-    draw.text((W//2, 650), arrow, fill=color, font=ImageFont.truetype("DejaVuSans-Bold.ttf", 220), anchor="mm")
-    draw.text((W//2, 950), f"XAUUSD — {arrow_text}", fill=(0,0,0), font=f_big, anchor="mm")
-
-    y = 1080
-    lines = [
-        (entry_text, color),
-        (f"SL: {stop:.2f}", color),
-        (f"TP1: {tp1:.2f}", color),
-        (f"TP2: {tp2:.2f}", color),
-        (f"TP3: {tp3:.2f}", color),
-    ]
-    for txt, c in lines:
-        # Черная часть до двоеточия, цветная цифры - упрощенно весь текст
-        draw.text((W//2, y), txt, fill=(0,0,0), font=f_num, anchor="mm")
-        y += 110
-
-    # Низ
-    draw.text((W//2, H-80), "СУХОЙ • XAUUSD", fill=(212,175,55), font=f_title, anchor="mm")
-
-    buf = io.BytesIO()
-    img.save(buf, format='PNG')
-    buf.seek(0)
-    return buf
+    # Цена
