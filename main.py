@@ -23,8 +23,4 @@ def pic(direct,price,sl,tp1,tp2,tp3,sila):
     draw.text((cx,y0+int(H*0.03)),arr,font=font(int(W*0.09)),fill=col,anchor="mm")
     draw.text((cx,y0+int(H*0.075)),f"Сила: {sila}%",font=font(int(W*0.05)),fill=(180,140,20),anchor="mm")
     draw.text((cx,y),f"Вход: {price:.2f}",font=font(int(W*0.055)),fill=(0,0,0),anchor="mm")
-    draw.text((cx,y+st),f"SL: {sl:.2f}",font=font(int(W*0.055)),fill=(180,30,30),anchor="mm")
-    draw.text((cx,y+st*2),f"TP1: {tp1:.2f}",font=font(int(W*0.055)),fill=(0,0,0),anchor="mm")
-    draw.text((cx,y+st*3),f"TP2: {tp2:.2f}",font=font(int(W*0.055)),fill=(0,0,0),anchor="mm")
-    draw.text((cx,y+st*4),f"TP3: {tp3:.2f}",font=font(int(W*0.055)),fill=(0,0,0),anchor="mm")
-    buf=BytesIO(); img.save(buf,format="JPEG",quality=92); buf.seek(
+    draw.text((cx,y+st),f"SL: {sl:.2f}",font=font(int(W*0.055)),fill=(180,30
