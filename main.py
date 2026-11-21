@@ -10,12 +10,10 @@ import pandas as pd
 TOKEN = os.environ.get("BOT_TOKEN") or "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
 APP_URL = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
 print(f"TOKEN exists: {bool(os.environ.get('BOT_TOKEN'))}", flush=True)
-print(f"APP_URL: {APP_URL}", flush=True)
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# ================= КНОПКИ =================
 def kb_main():
     m = telebot.types.InlineKeyboardMarkup()
     m.add(telebot.types.InlineKeyboardButton("📊 Сигнал", callback_data="signal"))
@@ -30,14 +28,12 @@ def kb_back():
     m.add(telebot.types.InlineKeyboardButton("⬅️ Назад", callback_data="back"))
     return m
 
-# ================= ШРИФТЫ =================
 def font(size, bold=True):
     try:
         return ImageFont.truetype("DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf", size)
     except:
         return ImageFont.load_default()
 
-# ================= КАРТИНКА НА ТВОЕМ ШАБЛОНЕ template.jpg =================
 def make_signal_from_template(direction, price, sl, tp1, tp2, tp3):
     try:
         img = Image.open("template.jpg").convert("RGB")
@@ -46,24 +42,20 @@ def make_signal_from_template(direction, price, sl, tp1, tp2, tp3):
         return None
     W, H = img.size
     draw = ImageDraw.Draw(img)
-
     if direction == "BUY":
         col = (0, 170, 80); arrow = "▲  BUY"
     elif direction == "SELL":
         col = (220, 30, 30); arrow = "▼  SELL"
     else:
         col = (180, 150, 40); arrow = "⏳  WAIT"
-
     x0, x1 = int(W*0.08), int(W*0.92)
     y0, y1 = int(H*0.60), int(H*0.96)
     draw.rounded_rectangle([x0, y0, x1, y1], radius=30, fill=(255, 255, 255))
     draw.rounded_rectangle([x0+8, y0+8, x1-8, y1-8], radius=25, outline=(212, 175, 55), width=3)
-
     cx = W // 2
     f_dir = font(int(W*0.09))
     f_line = font(int(W*0.058))
     f_small = font(int(W*0.035), bold=False)
-
     draw.text((cx, y0 + int(H*0.035)), arrow, font=f_dir, fill=col, anchor="mm")
     y = y0 + int(H*0.095)
     step = int(H*0.045)
@@ -72,12 +64,10 @@ def make_signal_from_template(direction, price, sl, tp1, tp2, tp3):
     draw.text((cx, y+step*2), f"TP1: {tp1:.2f}", font=f_line, fill=(0, 0, 0), anchor="mm")
     draw.text((cx, y+step*3), f"TP2: {tp2:.2f}", font=f_line, fill=(0, 0, 0), anchor="mm")
     draw.text((cx, y+step*4), f"TP3: {tp3:.2f}", font=f_line, fill=(0, 0, 0), anchor="mm")
-    draw.text((cx, y1 - int(H*0.025)), "СУХОЙ • XAUUSD • Risk 1% • RR 1:2", font=f_small, fill=(120, 120, 120), anchor="mm")
-
+    draw.text((cx, y1 - int(H*0.025)), "СУХОЙ - XAUUSD - Risk 1% - RR 1:2", font=f_small, fill=(120, 120, 120), anchor="mm")
     buf = BytesIO(); img.save(buf, format="JPEG", quality=92); buf.seek(0)
     return buf
 
-# ================= ДАННЫЕ =================
 def get_check_data():
     import yfinance as yf
     df = yf.download("GC=F", period="1d", interval="15m", progress=False, auto_adjust=False)
@@ -98,7 +88,6 @@ def get_check_data():
     fib382 = round(high - (high - low) * 0.382, 2)
     return price, ema50, rsi, fib618, fib382, df
 
-# ================= ГРАФИК =================
 def make_chart(df, ema50, fib618, fib382):
     import matplotlib
     matplotlib.use("Agg")
@@ -110,13 +99,127 @@ def make_chart(df, ema50, fib618, fib382):
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.set_facecolor("white")
     fig.patch.set_facecolor("white")
-    for i in range(len(closes)):
-        col = "green" if closes[i] >= opens[i] else "red"
-        ax.plot([i, i], [lows[i], highs[i]], color=col, linewidth=1)
-        ax.plot([i-0.3, i+0.3], [opens[i], opens[i]], color=col, linewidth=2)
-        ax.plot([i-0.3, i+0.3], [closes[i], closes[i]], color=col, linewidth=2)
+    n = len(closes)
+    for i in range(n):
+        c = "green" if closes[i] >= opens[i] else "red"
+        ax.plot([i, i], [lows[i], highs[i]], color=c, linewidth=1)
+        ax.plot([i-0.3, i+0.3], [opens[i], opens[i]], color=c, linewidth=2)
+        ax.plot([i-0.3, i+0.3], [closes[i], closes[i]], color=c, linewidth=2)
     s = pd.Series(closes)
-    ema_line = s.ewm(span=50).mean().values
-    ax.plot(ema_line, color="blue", linewidth=1.2, label=f"EMA50 {ema50:.2f}")
-    ax.axhline(fib618, color="orange", linestyle="--", linewidth=1, label=f"Fib 0.618 {fib618:.2f}")
-    ax.axhline(fib382, color="purple",
+    ema = s.ewm(span=50).mean().values
+    ax.plot(ema, color="blue", linewidth=1.2, label="EMA50")
+    ax.axhline(fib618, color="orange", linestyle="--", linewidth=1, label="Fib 0.618")
+    ax.axhline(fib382, color="purple", linestyle="--", linewidth=1, label="Fib 0.382")
+    ax.set_title("SUKHOY - XAUUSD - 15m", fontsize=14, fontweight="bold")
+    ax.legend(loc="upper left")
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    buf = BytesIO()
+    plt.savefig(buf, format="png", dpi=150)
+    plt.close()
+    buf.seek(0)
+    return buf
+
+@bot.message_handler(commands=["start"])
+def start(m):
+    bot.send_message(m.chat.id, "👑 <b>СУХОЙ • XAUUSD</b>\n\nНапиши /check - живой сигнал с графиком\nИли выбери раздел:", parse_mode="HTML", reply_markup=kb_main())
+
+@bot.message_handler(commands=["check"])
+def check(m):
+    bot.send_message(m.chat.id, "*Сухой*\n⌛ Считаю EMA + RSI + Fib + рисую график...", parse_mode="Markdown")
+    try:
+        price, ema50, rsi, fib618, fib382, df = get_check_data()
+    except Exception as e:
+        bot.send_message(m.chat.id, f"Ошибка данных: {e}\nПопробуй ещё раз через минуту.")
+        return
+    if price > ema50 and rsi < 65:
+        signal, sila = "BUY", 70
+        sl = round(price - 18, 2); tp1 = round(price + 10, 2); tp2 = round(price + 20, 2); tp3 = round(price + 30, 2)
+        reason = f"Цена выше EMA50, RSI {int(rsi)} - есть импульс вверх"
+        emoji = "🟢"
+    elif price < ema50 and rsi > 35:
+        signal, sila = "SELL", 65
+        sl = round(price + 18, 2); tp1 = round(price - 10, 2); tp2 = round(price - 20, 2); tp3 = round(price - 30, 2)
+        reason = f"Цена ниже EMA50, RSI {int(rsi)} - давление вниз"
+        emoji = "🔴"
+    else:
+        signal, sila = "WAIT", 50
+        sl = round(price - 18, 2); tp1 = round(price + 10, 2); tp2 = round(price + 20, 2); tp3 = round(price + 30, 2)
+        reason = f"Нет чёткого сигнала: Цена {price:.2f} / EMA50 {ema50:.2f} / RSI {int(rsi)} - лучше пропустить"
+        emoji = "⏳"
+    text = (
+        f"👑 СУХОЙ - XAUUSD - {emoji} {signal}\n\n"
+        f"💰 Цена: {price:.2f}\n"
+        f"📊 RSI: {int(rsi)} | EMA50: {ema50:.2f} | Сила: {sila}%\n"
+        f"📉 {reason}\n"
+        f"Fib 0.618: {fib618} | Fib 0.382: {fib382}\n\n"
+        f"Вход: {price:.2f}\n"
+        f"СТОП: {sl:.2f}\n"
+        f"ЦЕЛЬ 1: {tp1:.2f}\n"
+        f"ЦЕЛЬ 2: {tp2:.2f}\n"
+        f"ЦЕЛЬ 3: {tp3:.2f}"
+    )
+    img_chart = make_chart(df, ema50, fib618, fib382)
+    bot.send_photo(m.chat.id, img_chart, caption=text)
+    img_lux = make_signal_from_template(signal, price, sl, tp1, tp2, tp3)
+    if img_lux:
+        bot.send_photo(m.chat.id, img_lux, caption=f"🔥 {signal} XAUUSD - {price:.2f}")
+
+@bot.callback_query_handler(func=lambda c: True)
+def cb(c):
+    if c.data == "back":
+        bot.edit_message_text("👑 <b>СУХОЙ • XAUUSD</b>\n\nВыбери раздел:", c.message.chat.id, c.message.message_id, parse_mode="HTML", reply_markup=kb_main())
+    elif c.data == "signal":
+        price = round(random.uniform(3500, 3530), 2)
+        is_buy = random.choice([True, False])
+        direction = "BUY" if is_buy else "SELL"
+        sl = round(price - 10 if is_buy else price + 10, 2)
+        tp1 = round(price + 10 if is_buy else price - 10, 2)
+        tp2 = round(price + 20 if is_buy else price - 20, 2)
+        tp3 = round(price + 30 if is_buy else price - 30, 2)
+        img = make_signal_from_template(direction, price, sl, tp1, tp2, tp3)
+        if img:
+            bot.send_photo(c.message.chat.id, img, caption=f"🔥 <b>{direction} XAUUSD</b>\n\nВход: {price:.2f}\nSL: {sl:.2f}\nTP1: {tp1:.2f}\nTP2: {tp2:.2f}\nTP3: {tp3:.2f}", parse_mode="HTML", reply_markup=kb_back())
+        else:
+            bot.send_message(c.message.chat.id, "Нет шаблона template.jpg - загрузи его в GitHub")
+    elif c.data == "analytics":
+        bot.edit_message_text("📈 <b>Аналитика</b>\n\nЗолото держится выше 2650. Ключевой уровень - 2665. Пробой вверх - дальше к 2680.", c.message.chat.id, c.message.message_id, parse_mode="HTML", reply_markup=kb_back())
+    elif c.data == "news":
+        bot.edit_message_text("📰 <b>Новости</b>\n\n• Доллар под давлением\n• Золото - защитный актив\n• Сегодня: данные по инфляции США в 15:30", c.message.chat.id, c.message.message_id, parse_mode="HTML", reply_markup=kb_back())
+    elif c.data == "vip":
+        bot.edit_message_text("💎 <b>VIP</b>\n\n• Сигналы раньше всех\n• Точные TP/SL\n• Личная поддержка\n\nПиши: @vrajitor", c.message.chat.id, c.message.message_id, parse_mode="HTML", reply_markup=kb_back())
+    elif c.data == "help":
+        bot.edit_message_text("❓ <b>Помощь</b>\n\nНажми /check - живой сигнал с графиком.\nВопросы: @vrajitor", c.message.chat.id, c.message.message_id, parse_mode="HTML", reply_markup=kb_back())
+    bot.answer_callback_query(c.id)
+
+@app.route(f"/{TOKEN}", methods=["POST"])
+def webhook():
+    bot.process_new_updates([telebot.types.Update.de_json(request.stream.read().decode("utf-8"))])
+    return "OK", 200
+
+@app.route("/")
+def index():
+    return "Sukhoy Bot is alive!", 200
+
+if __name__ == "__main__":
+    print("=== STARTING SUKHOY BOT ===", flush=True)
+    print(f"TOKEN exists: {bool(os.environ.get('BOT_TOKEN'))}", flush=True)
+    print(f"APP_URL: {APP_URL}", flush=True)
+    print(f"PORT env: {os.environ.get('PORT')}", flush=True)
+    try:
+        if os.environ.get("BOT_TOKEN"):
+            try:
+                bot.remove_webhook()
+                bot.set_webhook(url=f"{APP_URL}/{TOKEN}")
+                print("Webhook set!", flush=True)
+            except Exception as e:
+                print(f"Webhook error: {e}", flush=True)
+                traceback.print_exc()
+        else:
+            print("!!! BOT_TOKEN ПУСТОЙ - проверь Environment !!!", flush=True)
+    except Exception as e:
+        print(f"Ошибка: {e}", flush=True)
+        traceback.print_exc()
+    port = int(os.environ.get("PORT", 10000))
+    print(f"Запускаю Flask на порту {port}...", flush=True)
+    app.run(host="0.0.0.0", port=port)
