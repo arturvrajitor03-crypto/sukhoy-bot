@@ -3,4 +3,4 @@ Flask
 requests
 pandas
 numpy
-matplotlib
+Pillow
