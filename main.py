@@ -52,39 +52,3 @@ def calc(d):
     if d["macd"]>d["ms"]: buy+=1
     else: sell+=1
     if 50<d["rsi"]<68: buy+=1
-    elif 32<d["rsi"]<50: sell+=1
-    if p<=d["bbl"]*1.002: buy+=1
-    elif p>=d["bbu"]*0.998: sell+=1
-    if abs(p-d["f618"])<d["atr"]: buy+=1
-    if abs(p-d["f382"])<d["atr"]: sell+=1
-    a=d["atr"]
-    if buy>=5 and buy>sell+1: return "BUY",min(95,65+buy*4),round(p-a*1.5,2),round(p+a*1.2,2),round(p+a*2.2,2),round(p+a*3.2,2)
-    if sell>=5 and sell>buy+1: return "SELL",min(95,65+sell*4),round(p+a*1.5,2),round(p-a*1.2,2),round(p-a*2.2,2),round(p-a*3.2,2)
-    return "WAIT",45,round(p-a*1.5,2),round(p+a*1.2,2),round(p+a*2.2,2),round(p+a*3.2,2)
-def chart(df):
-    import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
-    cl=df["Close"].values.flatten(); op=df["Open"].values.flatten(); hi=df["High"].values.flatten(); lo=df["Low"].values.flatten()
-    fig,ax=plt.subplots(figsize=(10,5)); ax.set_facecolor("white"); fig.patch.set_facecolor("white")
-    for i in range(len(cl)):
-        c="green" if cl[i]>=op[i] else "red"; ax.plot([i,i],[lo[i],hi[i]],color=c,linewidth=1); ax.plot([i-0.3,i+0.3],[op[i],op[i]],color=c,linewidth=2); ax.plot([i-0.3,i+0.3],[cl[i],cl[i]],color=c,linewidth=2)
-    ax.plot(pd.Series(cl).ewm(span=50).mean().values,color="blue",linewidth=1.2,label="EMA50"); ax.set_title("SUKHOY - XAUUSD - PRO",fontsize=14,fontweight="bold"); ax.legend(); ax.grid(True,alpha=0.3); plt.tight_layout()
-    buf=BytesIO(); plt.savefig(buf,format="png",dpi=100); plt.close(); buf.seek(0); return buf
-@bot.message_handler(commands=["start"])
-def start(m): bot.send_message(m.chat.id,"👑 СУХОЙ • XAUUSD • PRO\nНапиши /check")
-@bot.message_handler(commands=["check"])
-def check(m):
-    bot.send_message(m.chat.id,"⌛ PRO анализ... 1ч + 15м")
-    try: d=get_data(); sig,sila,sl,tp1,tp2,tp3=calc(d); price=d["price"]
-    except Exception as e: bot.send_message(m.chat.id,f"Ошибка: {e}"); return
-    bot.send_photo(m.chat.id,chart(d["df"])); im=pic(sig,price,sl,tp1,tp2,tp3,sila)
-    if im: bot.send_photo(m.chat.id,im)
-@app.route(f"/{TOKEN}",methods=["POST"])
-def webhook(): bot.process_new_updates([telebot.types.Update.de_json(request.stream.read().decode("utf-8"))]); return "OK",200
-@app.route("/")
-def index(): return "Sukhoy Bot is alive!",200
-if __name__=="__main__":
-    print("=== STARTING ===",flush=True)
-    try:
-        if os.environ.get("BOT_TOKEN"): bot.remove_webhook(); bot.set_webhook(url=f"{APP_URL}/{TOKEN}"); print("Webhook set!",flush=True)
-    except Exception as e: print(f"Webhook error: {e}",flush=True); traceback.print_exc()
-    port=int(os.environ.get("PORT",10000)); print(f"Port {port}",flush=True); app.run(host="0.0.0.0",port=port)
