@@ -27,10 +27,4 @@ def pic(direct,price,sl,tp1,tp2,tp3,sila):
     draw.text((cx,y+st*2),f"TP1: {tp1:.2f}",font=font(int(W*0.055)),fill=(0,0,0),anchor="mm")
     draw.text((cx,y+st*3),f"TP2: {tp2:.2f}",font=font(int(W*0.055)),fill=(0,0,0),anchor="mm")
     draw.text((cx,y+st*4),f"TP3: {tp3:.2f}",font=font(int(W*0.055)),fill=(0,0,0),anchor="mm")
-    buf=BytesIO(); img.save(buf,format="JPEG",quality=92); buf.seek(0); return buf
-def get_data():
-    import yfinance as yf
-    d15=yf.download("GC=F",period="5d",interval="15m",progress=False,auto_adjust=False)
-    if hasattr(d15.columns,"nlevels") and d15.columns.nlevels>1: d15.columns=d15.columns.get_level_values(0)
-    d15=d15.dropna(); d1h=yf.download("GC=F",period="1mo",interval="1h",progress=False,auto_adjust=False)
-    if hasattr(d1h.columns,"nlevels") and d1h.columns.nlevels>1: d1h.columns=d1h.columns.get_level_values
+    buf=BytesIO(); img.save(buf,format="JPEG",quality=92); buf.seek(
