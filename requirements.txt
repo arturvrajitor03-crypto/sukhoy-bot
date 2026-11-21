@@ -1,6 +1,6 @@
 pyTelegramBotAPI
 Flask
-requests
-pandas
-numpy
 Pillow
+yfinance
+pandas
+matplotlib
