@@ -1,15 +1,17 @@
-import os, random
+import os
+import random
 from io import BytesIO
 from flask import Flask, request
 import telebot
 from PIL import Image, ImageDraw, ImageFont
+import pandas as pd
 
 TOKEN = os.environ.get("BOT_TOKEN")
 APP_URL = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# --- Кнопки ---
+# ================= КНОПКИ =================
 def kb_main():
     m = telebot.types.InlineKeyboardMarkup()
     m.add(telebot.types.InlineKeyboardButton("📊 Сигнал", callback_data="signal"))
@@ -24,7 +26,7 @@ def kb_back():
     m.add(telebot.types.InlineKeyboardButton("⬅️ Назад", callback_data="back"))
     return m
 
-# --- Картинка сигнала ---
+# ================= КАРТИНКА СУХОЙ GOLD (только для кнопки Сигнал) =================
 def font(size, bold=False):
     try:
         name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
@@ -56,71 +58,112 @@ def make_image(direction, price, tp, sl):
     draw.text((W//2, H-70), "t.me/sukhoy  •  @sukhoy_bot", font=f_price, fill=GOLD, anchor="mm")
     buf = BytesIO(); img.save(buf, format="PNG"); buf.seek(0); return buf
 
-# --- Логика /check (твоя старая) ---
+# ================= ДАННЫЕ ДЛЯ /check =================
 def get_check_data():
-    # Если у тебя был yfinance - он будет тут, если нет - берём демо-цену
-    try:
-        import yfinance as yf
-        df = yf.download("GC=F", period="1d", interval="15m", progress=False)
-        price = float(df["Close"].iloc[-1].iloc[0] if hasattr(df["Close"].iloc[-1], "iloc") else df["Close"].iloc[-1])
-        closes = df["Close"].values.flatten()
-        import pandas as pd
-        s = pd.Series(closes)
-        ema50 = float(s.ewm(span=50).mean().iloc[-1])
-        delta = s.diff()
-        gain = delta.where(delta > 0, 0).rolling(14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-        rs = gain / loss
-        rsi = float(100 - (100 / (1 + rs.iloc[-1])))
-        high = float(s.max()); low = float(s.min())
-        fib618 = high - (high-low)*0.618
-        fib382 = high - (high-low)*0.382
-        return price, ema50, rsi, fib618, fib382, closes
-    except Exception as e:
-        print(f"yfinance fail: {e}", flush=True)
-        price = round(random.uniform(3500, 3530), 2)
-        ema50 = round(price + random.uniform(-20, 20), 2)
-        rsi = round(random.uniform(28, 45), 1)
-        fib618 = round(price + 2.65, 2); fib382 = round(price + 14.85, 2)
-        closes = [price + random.uniform(-10,10) for _ in range(60)]
-        return price, ema50, rsi, fib618, fib382, closes
+    import yfinance as yf
+    df = yf.download("GC=F", period="1d", interval="15m", progress=False, auto_adjust=False)
+    # yfinance иногда возвращает MultiIndex колонки - чиним
+    if hasattr(df.columns, "nlevels") and df.columns.nlevels > 1:
+        df.columns = df.columns.get_level_values(0)
+    df = df.dropna()
+    closes = df["Close"].values.flatten()
+    s = pd.Series(closes)
+    price = float(closes[-1])
+    ema50 = float(s.ewm(span=50).mean().iloc[-1])
+    delta = s.diff()
+    gain = delta.where(delta > 0, 0).rolling(14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+    rs = gain / loss
+    rsi = float(100 - (100 / (1 + rs.iloc[-1])))
+    high = float(s.max()); low = float(s.min())
+    fib618 = round(high - (high - low) * 0.618, 2)
+    fib382 = round(high - (high - low) * 0.382, 2)
+    return price, ema50, rsi, fib618, fib382, df
 
-def make_chart(closes):
-    try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        plt.figure(figsize=(10,5))
-        plt.plot(closes, color="black", linewidth=1)
-        plt.title("СУХОЙ - XAUUSD - 15m")
-        plt.grid(True, alpha=0.3)
-        buf = BytesIO(); plt.savefig(buf, format="png"); plt.close(); buf.seek(0)
-        return buf
-    except Exception as e:
-        print(f"chart fail: {e}", flush=True)
-        return make_image("BUY", 3508, 3518, 3526)
+# ================= ГРАФИК ДЛЯ /check - свечи + EMA + Fib =================
+def make_chart(df, ema50, fib618, fib382):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
 
-# --- Команды ---
+    closes = df["Close"].values.flatten()
+    opens = df["Open"].values.flatten()
+    highs = df["High"].values.flatten()
+    lows = df["Low"].values.flatten()
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.set_facecolor("white")
+    fig.patch.set_facecolor("white")
+
+    # Свечи
+    for i in range(len(closes)):
+        col = "green" if closes[i] >= opens[i] else "red"
+        ax.plot([i, i], [lows[i], highs[i]], color=col, linewidth=1)
+        ax.plot([i - 0.3, i + 0.3], [opens[i], opens[i]], color=col, linewidth=2)
+        ax.plot([i - 0.3, i + 0.3], [closes[i], closes[i]], color=col, linewidth=2)
+
+    # EMA50
+    s = pd.Series(closes)
+    ema_line = s.ewm(span=50).mean().values
+    ax.plot(ema_line, color="blue", linewidth=1.2, label=f"EMA50 {ema50:.2f}")
+
+    # Fib
+    ax.axhline(fib618, color="orange", linestyle="--", linewidth=1, label=f"Fib 0.618 {fib618:.2f}")
+    ax.axhline(fib382, color="purple", linestyle="--", linewidth=1, label=f"Fib 0.382 {fib382:.2f}")
+
+    ax.set_title("СУХОЙ - XAUUSD - 15m", fontsize=14, fontweight="bold")
+    ax.legend(loc="upper left")
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    buf = BytesIO()
+    plt.savefig(buf, format="png", dpi=150)
+    plt.close()
+    buf.seek(0)
+    return buf
+
+# ================= КОМАНДЫ =================
 @bot.message_handler(commands=["start"])
 def start(m):
-    bot.send_message(m.chat.id, "👑 <b>СУХОЙ • XAUUSD</b>\n\nНажми /check - получить живой сигнал\nИли выбери раздел:", parse_mode="HTML", reply_markup=kb_main())
+    bot.send_message(m.chat.id, "👑 <b>СУХОЙ • XAUUSD</b>\n\nНапиши /check - живой сигнал с графиком\nИли выбери раздел:", parse_mode="HTML", reply_markup=kb_main())
 
 @bot.message_handler(commands=["check"])
 def check(m):
     bot.send_message(m.chat.id, "*Сухой*\n⌛ Считаю EMA + RSI + Fib + рисую график...", parse_mode="Markdown")
-    price, ema50, rsi, fib618, fib382, closes = get_check_data()
-    # Логика сигнала как у тебя
-    if price > ema50 and rsi < 70:
-        signal = "BUY"; sila = 70
+    try:
+        price, ema50, rsi, fib618, fib382, df = get_check_data()
+    except Exception as e:
+        bot.send_message(m.chat.id, f"Ошибка данных: {e}\nПопробуй ещё раз через минуту.")
+        return
+
+    if price > ema50 and rsi < 65:
+        signal, sila = "BUY", 70
         sl = round(price - 18, 2); tp1 = round(price + 10, 2); tp2 = round(price + 20, 2); tp3 = round(price + 30, 2)
-    elif price < ema50 and rsi > 30:
-        signal = "SELL"; sila = 65
+        reason = f"Цена выше EMA50, RSI {int(rsi)} - есть импульс вверх"
+        emoji = "🟢"
+    elif price < ema50 and rsi > 35:
+        signal, sila = "SELL", 65
         sl = round(price + 18, 2); tp1 = round(price - 10, 2); tp2 = round(price - 20, 2); tp3 = round(price - 30, 2)
+        reason = f"Цена ниже EMA50, RSI {int(rsi)} - давление вниз"
+        emoji = "🔴"
     else:
-        signal = "WAIT"; sila = 50
-        sl = round(price + 18, 2); tp1 = round(price + 10, 2); tp2 = round(price + 20, 2); tp3 = round(price + 30, 2)
-    img = make_chart(closes)
-    text = f"👑 СУХОЙ - XAUUSD - ⏳ {signal}\n\n💰 Цена: {price}\n📊 RSI: {int(rsi)} | EMA50: {ema50} | Сила: {sila}%\n📉 Нет чёткого сигнала: Цена {price} / EMA50 {ema50} / RSI {int(rsi)} - лучше пропустить\nFib 0.618: {fib618} | Fib 0.382: {fib382}\n\nВход: {price}\nСТОП: {sl}\nЦЕЛЬ 1: {tp1}\nЦЕЛЬ 2: {tp2}\nЦЕЛЬ 3: {tp3}"
+        signal, sila = "WAIT", 50
+        sl = round(price - 18, 2); tp1 = round(price + 10, 2); tp2 = round(price + 20, 2); tp3 = round(price + 30, 2)
+        reason = f"Нет чёткого сигнала: Цена {price} / EMA50 {ema50} / RSI {int(rsi)} - лучше пропустить"
+        emoji = "⏳"
+
+    img = make_chart(df, ema50, fib618, fib382)
+    text = (
+        f"👑 СУХОЙ - XAUUSD - {emoji} {signal}\n\n"
+        f"💰 Цена: {price}\n"
+        f"📊 RSI: {int(rsi)} | EMA50: {ema50} | Сила: {sila}%\n"
+        f"📉 {reason}\n"
+        f"Fib 0.618: {fib618} | Fib 0.382: {fib382}\n\n"
+        f"Вход: {price}\n"
+        f"СТОП: {sl}\n"
+        f"ЦЕЛЬ 1: {tp1}\n"
+        f"ЦЕЛЬ 2: {tp2}\n"
+        f"ЦЕЛЬ 3: {tp3}"
+    )
     bot.send_photo(m.chat.id, img, caption=text)
 
 @bot.callback_query_handler(func=lambda c: True)
@@ -128,21 +171,24 @@ def cb(c):
     if c.data == "back":
         bot.edit_message_text("👑 <b>СУХОЙ • XAUUSD</b>\n\nВыбери раздел:", c.message.chat.id, c.message.message_id, parse_mode="HTML", reply_markup=kb_main())
     elif c.data == "signal":
-        price = round(random.uniform(2640, 2660), 2)
-        is_buy = random.choice([True, False]); direction = "BUY" if is_buy else "SELL"
-        tp = round(price + 20 if is_buy else price - 20, 2); sl = round(price - 10 if is_buy else price + 10, 2)
+        price = round(random.uniform(3500, 3530), 2)
+        is_buy = random.choice([True, False])
+        direction = "BUY" if is_buy else "SELL"
+        tp = round(price + 20 if is_buy else price - 20, 2)
+        sl = round(price - 10 if is_buy else price + 10, 2)
         img = make_image(direction, price, tp, sl)
         bot.send_photo(c.message.chat.id, img, caption=f"🔥 <b>{direction} XAUUSD</b>\n\nEntry: {price}\nTP: {tp}\nSL: {sl}", parse_mode="HTML", reply_markup=kb_back())
     elif c.data == "analytics":
-        bot.edit_message_text("📈 <b>Аналитика</b>\n\nЗолото держится выше 2650. Ключевой уровень - 2665.", c.message.chat.id, c.message.message_id, parse_mode="HTML", reply_markup=kb_back())
+        bot.edit_message_text("📈 <b>Аналитика</b>\n\nЗолото держится выше 2650. Ключевой уровень - 2665. Пробой вверх - дальше к 2680.", c.message.chat.id, c.message.message_id, parse_mode="HTML", reply_markup=kb_back())
     elif c.data == "news":
-        bot.edit_message_text("📰 <b>Новости</b>\n\n• Доллар под давлением\n• Золото - защитный актив", c.message.chat.id, c.message.message_id, parse_mode="HTML", reply_markup=kb_back())
+        bot.edit_message_text("📰 <b>Новости</b>\n\n• Доллар под давлением\n• Золото - защитный актив\n• Сегодня: данные по инфляции США в 15:30", c.message.chat.id, c.message.message_id, parse_mode="HTML", reply_markup=kb_back())
     elif c.data == "vip":
-        bot.edit_message_text("💎 <b>VIP</b>\n\nПиши: @vrajitor", c.message.chat.id, c.message.message_id, parse_mode="HTML", reply_markup=kb_back())
+        bot.edit_message_text("💎 <b>VIP</b>\n\n• Сигналы раньше всех\n• Точные TP/SL\n• Личная поддержка\n\nПиши: @vrajitor", c.message.chat.id, c.message.message_id, parse_mode="HTML", reply_markup=kb_back())
     elif c.data == "help":
-        bot.edit_message_text("❓ <b>Помощь</b>\n\nНажми /check - живой сигнал.", c.message.chat.id, c.message.message_id, parse_mode="HTML", reply_markup=kb_back())
+        bot.edit_message_text("❓ <b>Помощь</b>\n\nНажми /check - живой сигнал с графиком.\nВопросы: @vrajitor", c.message.chat.id, c.message.message_id, parse_mode="HTML", reply_markup=kb_back())
     bot.answer_callback_query(c.id)
 
+# ================= WEBHOOK =================
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
     bot.process_new_updates([telebot.types.Update.de_json(request.stream.read().decode("utf-8"))])
@@ -154,8 +200,10 @@ def index():
 
 if __name__ == "__main__":
     print("=== STARTING SUKHOY BOT ===", flush=True)
+    print(f"TOKEN exists: {bool(TOKEN)}", flush=True)
     try:
-        bot.remove_webhook(); bot.set_webhook(url=f"{APP_URL}/{TOKEN}")
+        bot.remove_webhook()
+        bot.set_webhook(url=f"{APP_URL}/{TOKEN}")
         print("Webhook set!", flush=True)
     except Exception as e:
         print(f"Webhook error: {e}", flush=True)
