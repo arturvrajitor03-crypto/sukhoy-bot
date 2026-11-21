@@ -15,7 +15,7 @@ def get_data():
     try:
         url = url = "https://data-api.binance.vision/api/v3/klines"
         params = {"symbol": "PAXGUSDT", "interval": "15m", "limit": 200}
-        r = requests.get(url, timeout=10)
+        r = requests.get(url, params=params, timeout=10)
         data = r.json()
         if not data or isinstance(data, dict):
             return None
