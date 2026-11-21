@@ -84,23 +84,4 @@ def get_data():
     if d15.columns.nlevels > 1:
         d15.columns = d15.columns.get_level_values(0)
     d15 = d15.dropna()
-    d1h = yf.download("GC=F", period="1mo", interval="1h", progress=False, auto_adjust=False)
-    if d1h.columns.nlevels > 1:
-        d1h.columns = d1h.columns.get_level_values(0)
-    d1h = d1h.dropna()
-    s = pd.Series(d15["Close"].values.flatten())
-    s1h = pd.Series(d1h["Close"].values.flatten())
-    price = float(s.iloc[-1])
-    ema50 = float(s.ewm(span=50).mean().iloc[-1])
-    e200 = float(s1h.ewm(span=200).mean().iloc[-1])
-    if price > e200:
-        trend = "UP"
-    else:
-        trend = "DOWN"
-    delta = s.diff()
-    gain = delta.where(delta > 0, 0)
-    gain = gain.rolling(14).mean()
-    loss = -delta.where(delta < 0, 0)
-    loss = loss.rolling(14).mean()
-    g = gain.iloc[-1]
-    l =
+    d1h = yf.download("GC=F", period="1mo", interval="1h", progress=False, auto_adjust
