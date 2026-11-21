@@ -6,6 +6,7 @@ from flask import Flask, request
 import telebot
 from PIL import Image, ImageDraw, ImageFont
 import pandas as pd
+import numpy as np
 
 TOKEN = os.environ.get("BOT_TOKEN") or "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
 APP_URL = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
@@ -70,25 +71,98 @@ def make_signal_from_template(direction, price, sl, tp1, tp2, tp3, sila=70):
     buf = BytesIO(); img.save(buf, format="JPEG", quality=92); buf.seek(0)
     return buf
 
+# ===== МОЩНАЯ АНАЛИТИКА =====
 def get_check_data():
     import yfinance as yf
-    df = yf.download("GC=F", period="1d", interval="15m", progress=False, auto_adjust=False)
+    df = yf.download("GC=F", period="5d", interval="15m", progress=False, auto_adjust=False)
     if hasattr(df.columns, "nlevels") and df.columns.nlevels > 1:
         df.columns = df.columns.get_level_values(0)
     df = df.dropna()
     closes = df["Close"].values.flatten()
     s = pd.Series(closes)
     price = float(closes[-1])
-    ema50 = round(float(s.ewm(span=50).mean().iloc[-1]), 2)
+    ema50 = float(s.ewm(span=50).mean().iloc[-1])
+    ema200 = float(s.ewm(span=200).mean().iloc[-1])
+    # RSI
     delta = s.diff()
     gain = delta.where(delta > 0, 0).rolling(14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
     rs = gain / loss
     rsi = float(100 - (100 / (1 + rs.iloc[-1])))
-    high = float(s.max()); low = float(s.min())
-    fib618 = round(high - (high - low) * 0.618, 2)
-    fib382 = round(high - (high - low) * 0.382, 2)
-    return price, ema50, rsi, fib618, fib382, df
+    # MACD
+    ema12 = s.ewm(span=12).mean()
+    ema26 = s.ewm(span=26).mean()
+    macd = ema12 - ema26
+    macd_sig = macd.ewm(span=9).mean()
+    macd_val = float(macd.iloc[-1])
+    macd_sig_val = float(macd_sig.iloc[-1])
+    # Bollinger
+    ma20 = s.rolling(20).mean()
+    std20 = s.rolling(20).std()
+    bb_up = float(ma20.iloc[-1] + 2*std20.iloc[-1])
+    bb_low = float(ma20.iloc[-1] - 2*std20.iloc[-1])
+    # ATR - волатильность для SL/TP
+    high = df["High"].values.flatten()
+    low = df["Low"].values.flatten()
+    tr = np.maximum(high[1:]-low[1:], np.maximum(abs(high[1:]-closes[:-1]), abs(low[1:]-closes[:-1])))
+    atr = float(pd.Series(tr).rolling(14).mean().iloc[-1])
+    if atr < 1: atr = 5.0
+    if atr > 20: atr = 20.0
+    # Fib
+    high5 = float(s.max()); low5 = float(s.min())
+    fib618 = round(high5 - (high5 - low5) * 0.618, 2)
+    fib382 = round(high5 - (high5 - low5) * 0.382, 2)
+    return {
+        "price": price, "ema50": ema50, "ema200": ema200, "rsi": rsi,
+        "macd": macd_val, "macd_sig": macd_sig_val,
+        "bb_up": bb_up, "bb_low": bb_low, "atr": atr,
+        "fib618": fib618, "fib382": fib382, "df": df
+    }
+
+def calc_powerful_signal(d):
+    price = d["price"]; score_buy = 0; score_sell = 0; reasons = []
+    # 1. EMA тренд
+    if price > d["ema50"] > d["ema200"]:
+        score_buy += 2; reasons.append("EMA50>EMA200")
+    elif price < d["ema50"] < d["ema200"]:
+        score_sell += 2; reasons.append("EMA50<EMA200")
+    # 2. MACD
+    if d["macd"] > d["macd_sig"]:
+        score_buy += 1
+    else:
+        score_sell += 1
+    # 3. RSI
+    if 50 < d["rsi"] < 70:
+        score_buy += 1
+    elif 30 < d["rsi"] < 50:
+        score_sell += 1
+    # 4. Bollinger - отбой от края
+    if price <= d["bb_low"] * 1.002:
+        score_buy += 1; reasons.append("Отбой от низа BB")
+    elif price >= d["bb_up"] * 0.998:
+        score_sell += 1; reasons.append("Отбой от верха BB")
+    # 5. Fib
+    if abs(price - d["fib618"]) < d["atr"]:
+        score_buy += 1; reasons.append("У уровня Fib 0.618")
+    if abs(price - d["fib382"]) < d["atr"]:
+        score_sell += 1
+
+    atr = d["atr"]
+    if score_buy >= 4 and score_buy > score_sell:
+        sila = min(95, 60 + score_buy*7)
+        sl = round(price - atr*1.5, 2)
+        tp1 = round(price + atr*1.0, 2); tp2 = round(price + atr*2.0, 2); tp3 = round(price + atr*3.0, 2)
+        return "BUY", sila, sl, tp1, tp2, tp3
+    if score_sell >= 4 and score_sell > score_buy:
+        sila = min(95, 60 + score_sell*7)
+        sl = round(price + atr*1.5, 2)
+        tp1 = round(price - atr*1.0, 2); tp2 = round(price - atr*2.0, 2); tp3 = round(price - atr*3.0, 2)
+        return "SELL", sila, sl, tp1, tp2, tp3
+    # WAIT - нет сильного сигнала
+    sila = 45
+    sl = round(price - atr*1.5, 2)
+    tp1 = round(price + atr*1.0, 2); tp2 = round(price + atr*2.0, 2); tp3 = round(price + atr*3.0, 2)
+    return "WAIT", sila, sl, tp1, tp2, tp3
 
 def make_chart(df, ema50, fib618, fib382):
     import matplotlib
@@ -112,37 +186,31 @@ def make_chart(df, ema50, fib618, fib382):
     ax.plot(ema, color="blue", linewidth=1.2, label="EMA50")
     ax.axhline(fib618, color="orange", linestyle="--", linewidth=1, label="Fib 0.618")
     ax.axhline(fib382, color="purple", linestyle="--", linewidth=1, label="Fib 0.382")
-    ax.set_title("SUKHOY - XAUUSD - 15m", fontsize=14, fontweight="bold")
+    ax.set_title("SUKHOY - XAUUSD - 15m - POWER", fontsize=14, fontweight="bold")
     ax.legend(loc="upper left")
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
     buf = BytesIO()
-    plt.savefig(buf, format="png", dpi=150)
+    plt.savefig(buf, format="png", dpi=100)
     plt.close()
     buf.seek(0)
     return buf
 
 @bot.message_handler(commands=["start"])
 def start(m):
-    bot.send_message(m.chat.id, "👑 <b>СУХОЙ • XAUUSD</b>\n\nНапиши /check - живой сигнал с графиком\nИли выбери раздел:", parse_mode="HTML", reply_markup=kb_main())
+    bot.send_message(m.chat.id, "👑 <b>СУХОЙ • XAUUSD • POWER</b>\n\nНапиши /check - мощный сигнал\nИли выбери раздел:", parse_mode="HTML", reply_markup=kb_main())
 
 @bot.message_handler(commands=["check"])
 def check(m):
+    bot.send_message(m.chat.id, "⌛ Считаю... EMA + MACD + RSI + BB + Fib + ATR")
     try:
-        price, ema50, rsi, fib618, fib382, df = get_check_data()
+        d = get_check_data()
+        signal, sila, sl, tp1, tp2, tp3 = calc_powerful_signal(d)
+        price = d["price"]
     except Exception as e:
         bot.send_message(m.chat.id, f"Ошибка данных: {e}")
         return
-    if price > ema50 and rsi < 65:
-        signal, sila = "BUY", 80
-        sl = round(price - 18, 2); tp1 = round(price + 10, 2); tp2 = round(price + 20, 2); tp3 = round(price + 30, 2)
-    elif price < ema50 and rsi > 35:
-        signal, sila = "SELL", 65
-        sl = round(price + 18, 2); tp1 = round(price - 10, 2); tp2 = round(price - 20, 2); tp3 = round(price - 30, 2)
-    else:
-        signal, sila = "WAIT", 50
-        sl = round(price - 18, 2); tp1 = round(price + 10, 2); tp2 = round(price + 20, 2); tp3 = round(price + 30, 2)
-    img_chart = make_chart(df, ema50, fib618, fib382)
+    img_chart = make_chart(d["df"], d["ema50"], d["fib618"], d["fib382"])
     bot.send_photo(m.chat.id, img_chart)
     img_lux = make_signal_from_template(signal, price, sl, tp1, tp2, tp3, sila=sila)
     if img_lux:
@@ -167,13 +235,13 @@ def cb(c):
         else:
             bot.send_message(c.message.chat.id, "Нет шаблона template.jpg")
     elif c.data == "analytics":
-        bot.edit_message_text("📈 <b>Аналитика</b>\n\nЗолото держится выше 2650. Ключевой уровень - 2665. Пробой вверх - дальше к 2680.", c.message.chat.id, c.message.message_id, parse_mode="HTML", reply_markup=kb_back())
+        bot.edit_message_text("📈 <b>Аналитика POWER</b>\n\nEMA50 + EMA200 + MACD + RSI + Bollinger + ATR + Fib.\nСигнал только если 4+ балла из 6.", c.message.chat.id, c.message.message_id, parse_mode="HTML", reply_markup=kb_back())
     elif c.data == "news":
         bot.edit_message_text("📰 <b>Новости</b>\n\n• Доллар под давлением\n• Золото - защитный актив\n• Сегодня: данные по инфляции США в 15:30", c.message.chat.id, c.message.message_id, parse_mode="HTML", reply_markup=kb_back())
     elif c.data == "vip":
         bot.edit_message_text("💎 <b>VIP</b>\n\n• Сигналы раньше всех\n• Точные TP/SL\n• Личная поддержка\n\nПиши: @vrajitor", c.message.chat.id, c.message.message_id, parse_mode="HTML", reply_markup=kb_back())
     elif c.data == "help":
-        bot.edit_message_text("❓ <b>Помощь</b>\n\nНажми /check - живой сигнал с графиком.\nВопросы: @vrajitor", c.message.chat.id, c.message.message_id, parse_mode="HTML", reply_markup=kb_back())
+        bot.edit_message_text("❓ <b>Помощь</b>\n\nНажми /check - мощный сигнал.\nВопросы: @vrajitor", c.message.chat.id, c.message.message_id, parse_mode="HTML", reply_markup=kb_back())
     bot.answer_callback_query(c.id)
 
 @app.route(f"/{TOKEN}", methods=["POST"])
