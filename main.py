@@ -73,12 +73,10 @@ def make_signal_from_template(direction, price, sl, tp1, tp2, tp3, sila=70):
 
 def get_pro_data():
     import yfinance as yf
-    # 15m - для входа
     df15 = yf.download("GC=F", period="5d", interval="15m", progress=False, auto_adjust=False)
     if hasattr(df15.columns, "nlevels") and df15.columns.nlevels > 1:
         df15.columns = df15.columns.get_level_values(0)
     df15 = df15.dropna()
-    # 1h - для главного тренда
     df1h = yf.download("GC=F", period="1mo", interval="1h", progress=False, auto_adjust=False)
     if hasattr(df1h.columns, "nlevels") and df1h.columns.nlevels > 1:
         df1h.columns = df1h.columns.get_level_values(0)
@@ -113,28 +111,21 @@ def get_pro_data():
 
 def calc_pro_signal(d):
     price = d["price"]; buy = 0; sell = 0
-    # ГЛАВНЫЙ ФИЛЬТР - 1ч тренд, 3 балла
     if d["trend_1h"] == "UP":
         buy += 3
     else:
         sell += 3
-    # 15м EMA
     if price > d["ema50"]: buy += 1
     else: sell += 1
-    # MACD
     if d["macd"] > d["macd_sig"]: buy += 1
     else: sell += 1
-    # RSI - идеальная зона
     if 50 < d["rsi"] < 68: buy += 1
     elif 32 < d["rsi"] < 50: sell += 1
-    # Bollinger отбой
     if price <= d["bb_low"]*1.002: buy += 1
     elif price >= d["bb_up"]*0.998: sell += 1
-    # Fib
     if abs(price - d["fib618"]) < d["atr"]: buy += 1
     if abs(price - d["fib382"]) < d["atr"]: sell += 1
     atr = d["atr"]
-    # Нужно 5 из 7 и совпадение с 1ч
     if buy >= 5 and buy > sell + 1:
         sila = min(95, 65 + buy*4)
         sl = round(price - atr*1.5, 2)
@@ -220,39 +211,4 @@ def cb(c):
     elif c.data == "news":
         bot.edit_message_text("📰 <b>Новости</b>\n\n• Доллар под давлением\n• Золото - защитный актив\n• Сегодня: данные по инфляции США в 15:30", c.message.chat.id, c.message.message_id, parse_mode="HTML", reply_markup=kb_back())
     elif c.data == "vip":
-        bot.edit_message_text("💎 <b>VIP</b>\n\n• Сигналы раньше всех\n• Точные TP/SL\n• Личная поддержка\n\nПиши: @vrajitor", c.message.chat.id, c.message.message_id, parse_mode="HTML", reply_markup=kb_back())
-    elif c.data == "help":
-        bot.edit_message_text("❓ <b>Помощь</b>\n\nНажми /check - мощный сигнал.\nВопросы: @vrajitor", c.message.chat.id, c.message.message_id, parse_mode="HTML", reply_markup=kb_back())
-    bot.answer_callback_query(c.id)
-
-@app.route(f"/{TOKEN}", methods=["POST"])
-def webhook():
-    bot.process_new_updates([telebot.types.Update.de_json(request.stream.read().decode("utf-8"))])
-    return "OK", 200
-
-@app.route("/")
-def index():
-    return "Sukhoy Bot is alive!", 200
-
-if __name__ == "__main__":
-    print("=== STARTING SUKHOY BOT ===", flush=True)
-    print(f"TOKEN exists: {bool(os.environ.get('BOT_TOKEN'))}", flush=True)
-    print(f"APP_URL: {APP_URL}", flush=True)
-    print(f"PORT env: {os.environ.get('PORT')}", flush=True)
-    try:
-        if os.environ.get("BOT_TOKEN"):
-            try:
-                bot.remove_webhook()
-                bot.set_webhook(url=f"{APP_URL}/{TOKEN}")
-                print("Webhook set!", flush=True)
-            except Exception as e:
-                print(f"Webhook error: {e}", flush=True)
-                traceback.print_exc()
-        else:
-            print("!!! BOT_TOKEN ПУСТОЙ !!!", flush=True)
-    except Exception as e:
-        print(f"Ошибка: {e}", flush=True)
-        traceback.print_exc()
-    port = int(os.environ.get("PORT", 10000))
-    print(f"Запускаю Flask на порту {port}...", flush=True)
-    app.run(host="0.0.0.0", port=port)
+        bot.edit_message
