@@ -1,11 +1,22 @@
 import requests
-import time
 import telebot
+import threading
+import os
+from flask import Flask
 
 BOT_TOKEN = "9241841874:AAEzhDrKaYVetMgcyRjq3ywK2YQS0RaRib4"
 CHAT_ID = "8131803573"
 
 bot = telebot.TeleBot(BOT_TOKEN)
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is alive!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
 
 def get_price(symbol):
     try:
@@ -56,5 +67,7 @@ def handle_all(message):
 def handle_all_messages(message):
     bot.reply_to(message, "Напиши /start для меню")
 
-print("Bot started...")
-bot.polling(none_stop=True, interval=0, timeout=20)
+if __name__ == "__main__":
+    threading.Thread(target=run_flask, daemon=True).start()
+    print("Bot started...")
+    bot.polling(none_stop=True, interval=0, timeout=20)
