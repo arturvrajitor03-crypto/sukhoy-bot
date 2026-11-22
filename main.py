@@ -1,51 +1,69 @@
-<!DOCTYPE html>
-<html>
-<head>
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<style>
-*{box-sizing:border-box}
-body{margin:0;background:#111;overflow:hidden}
-#score{color:white;text-align:center;font-size:32px;font-weight:bold;padding:10px;background:#000}
-#road{width:100vw;height:calc(100vh - 190px);background:#333;position:relative;overflow:hidden;border-left:8px solid yellow;border-right:8px solid yellow}
-#car{width:90px;height:150px;position:absolute;bottom:20px;left:calc(50% - 45px);font-size:85px;line-height:150px;text-align:center}
-.enemy{width:90px;height:150px;position:absolute;font-size:85px;line-height:150px;text-align:center}
-#btns{display:flex;justify-content:space-around;padding:10px;background:#000}
-button{width:45vw;height:90px;font-size:50px;border-radius:20px;background:#444;color:white;border:none}
-</style>
-</head>
-<body>
-<div id="score">ОЧКИ: 0</div>
-<div id="road"><div id="car">🚗</div></div>
-<div id="btns">
-<button onclick="move(-1)">⬅️</button>
-<button onclick="move(1)">➡️</button>
-</div>
-<script>
-let car=document.getElementById('car');
-let road=document.getElementById('road');
-let x=window.innerWidth/2-45, score=0, speed=6;
-function move(d){ x+=d*90; if(x<5)x=5; if(x>window.innerWidth-95)x=window.innerWidth-95; car.style.left=x+'px'; }
-function spawn(){
-  let e=document.createElement('div');
-  e.className='enemy'; e.innerHTML='🚙';
-  let lanes=[5, window.innerWidth/4, window.innerWidth/2-45, window.innerWidth*0.75-90, window.innerWidth-95];
-  e.style.left=lanes[Math.floor(Math.random()*5)]+'px';
-  e.style.top='-160px'; road.appendChild(e);
-  let y=-160;
-  let iv=setInterval(()=>{
-    y+=speed; e.style.top=y+'px';
-    if(y>window.innerHeight){ clearInterval(iv); e.remove(); score++; document.getElementById('score').innerHTML='ОЧКИ: '+score; }
-    if(y>window.innerHeight-400 && y<window.innerHeight-200 && Math.abs(parseInt(e.style.left)-x)<70){
-      alert('АВАРИЯ! Очки: '+score); location.reload();
-    }
-  },20);
-}
-setInterval(spawn,800);
-setInterval(()=>{ speed+=0.3 },4000);
-// свайп пальцем
-let sx=0;
-document.addEventListener('touchstart',e=>sx=e.touches[0].clientX);
-document.addEventListener('touchmove',e=>{ let dx=e.touches[0].clientX-sx; if(dx>40){move(1);sx=e.touches[0].clientX} if(dx<-40){move(-1);sx=e.touches[0].clientX} });
-</script>
-</body>
-</html>
+import requests, time, threading
+
+BOT_TOKEN = "ВСТАВЬ_СЮДА_СВОЙ_ТОКЕН"
+CHAT_ID = "ВСТАВЬ_СЮДА_СВОЙ_CHAT_ID"
+
+BALANCE = 500.0
+TRADES = 0
+PNL = 0.0
+POSITION = None
+SYMBOL = "BTCUSDT"
+BINANCE = "https://api.binance.com/api/v3"
+
+def send(text):
+    try:
+        requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", params={"chat_id": CHAT_ID, "text": text}, timeout=10)
+    except Exception as e:
+        print("send error:", e)
+
+def get_price():
+    try:
+        r = requests.get(f"{BINANCE}/ticker/price?symbol={SYMBOL}", timeout=10).json()
+        return float(r["price"])
+    except:
+        return 0
+
+def telegram_poll():
+    offset = 0
+    print("Poll started")
+    while True:
+        try:
+            r = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates", params={"offset": offset, "timeout": 10}, timeout=15).json()
+            for u in r.get("result", []):
+                offset = u["update_id"] + 1
+                msg = u.get("message", {})
+                txt = msg.get("text", "").strip()
+                print("Got:", txt)
+                if txt == "/start":
+                    send("🤖 Бот работает!\nКоманды:\n/balance - баланс\n/price - цена BTC\n/year - бэктест за год")
+                if txt == "/balance":
+                    send(f"💰 Баланс: {BALANCE:.1f}$\nСделок: {TRADES}\nPnL: {PNL:.1f}$\nПозиция: {POSITION if POSITION else 'нет'}")
+                if txt == "/price":
+                    p = get_price()
+                    send(f"₿ BTC: {p}$")
+                if txt == "/year":
+                    send("📅 Бэктест за год: скоро будет, пока тестируем живой режим")
+        except Exception as e:
+            print("poll error:", e)
+        time.sleep(2)
+
+def loop():
+    global BALANCE, TRADES, PNL, POSITION
+    while True:
+        try:
+            price = get_price()
+            print(f"Price: {price} Balance: {BALANCE}")
+            # Простая логика: если нет позиции - покупаем, если есть - держим
+            if POSITION is None and price > 0:
+                POSITION = price
+                send(f"🟢 Купил BTC по {price}$")
+            time.sleep(60)
+        except Exception as e:
+            print("loop error:", e)
+            time.sleep(10)
+
+threading.Thread(target=telegram_poll, daemon=True).start()
+threading.Thread(target=loop, daemon=True).start()
+print("Bot started!")
+while True:
+    time.sleep(10)
