@@ -1,59 +1,60 @@
-import requests, time, threading, os
-from flask import Flask
+import requests
+import time
+import telebot
 
-# ===== МЕНЯЙ ТОЛЬКО ЭТИ 2 СТРОЧКИ =====
-# Сотри всё что в кавычках и вставь свой токен из @BotFather
-BOT_TOKEN = "9241841874:AAEzhDrKaYVetMgcyRjq3ywK2YQS0RaRib4"
-# Сотри всё что в кавычках и вставь свой CHAT_ID
+BOT_TOKEN = "8438134445:AAG0kK6zN_2gHq7dH3vXhJ8h9wKkL3Qv9E"
 CHAT_ID = "8131803573"
-# ======================================
 
-BALANCE = 500.0
-TRADES = 0
-PNL = 0.0
-POSITION = None
-SYMBOL = "BTCUSDT"
-BINANCE = "https://api.binance.com/api/v3"
+bot = telebot.TeleBot(BOT_TOKEN)
 
-app = Flask(__name__)
-
-@app.route("/")
-def home():
-    return "Bot is alive!"
-
-def run_web():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
-
-threading.Thread(target=run_web, daemon=True).start()
-
-def send(text):
+def get_price(symbol):
     try:
-        requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", params={"chat_id": CHAT_ID, "text": text}, timeout=10)
+        url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}USDT"
+        r = requests.get(url, timeout=10)
+        data = r.json()
+        return float(data["price"])
     except Exception as e:
-        print("send error:", e)
-
-def get_price():
-    try:
-        r = requests.get(f"{BINANCE}/ticker/price?symbol={SYMBOL}", timeout=10).json()
-        return float(r["price"])
-    except:
+        print(f"Error {symbol}: {e}")
         return 0
 
-def telegram_poll():
-    offset = 0
-    print("Poll started")
-    while True:
-        try:
-            r = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates", params={"offset": offset, "timeout": 10}, timeout=15).json()
-            for u in r.get("result", []):
-                offset = u["update_id"] + 1
-                txt = u.get("message", {}).get("text", "").strip()
-                print("Got:", txt)
-                if txt == "/start":
-                    send("🤖 Бот работает!\n/balance - баланс\n/price - цена BTC")
-                if txt == "/balance":
-                    send(f"💰 Баланс: {BALANCE:.1f}$\nСделок: {TRADES}\nPnL: {PNL:.1f}$")
-                if txt == "/price":
-                    p = get_price()
-                    send(f"₿ BTC: {
+@bot.message_handler(commands=['start'])
+def handle_start(message):
+    text = (
+        "🤖 Бот работает!\n\n"
+        "Команды:\n"
+        "/start - проверить бота\n"
+        "/btc - цена BTC\n"
+        "/eth - цена ETH\n"
+        "/all - все цены"
+    )
+    bot.reply_to(message, text)
+
+@bot.message_handler(commands=['btc'])
+def handle_btc(message):
+    price = get_price("BTC")
+    bot.reply_to(message, f"🪙 BTC: {price:.2f} USDT")
+
+@bot.message_handler(commands=['eth'])
+def handle_eth(message):
+    price = get_price("ETH")
+    bot.reply_to(message, f"💎 ETH: {price:.2f} USDT")
+
+@bot.message_handler(commands=['all'])
+def handle_all(message):
+    btc = get_price("BTC")
+    eth = get_price("ETH")
+    sol = get_price("SOL")
+    text = (
+        f"📊 Цены:\n\n"
+        f"🪙 BTC: {btc:.2f} USDT\n"
+        f"💎 ETH: {eth:.2f} USDT\n"
+        f"◎ SOL: {sol:.2f} USDT"
+    )
+    bot.reply_to(message, text)
+
+@bot.message_handler(func=lambda m: True)
+def handle_all_messages(message):
+    bot.reply_to(message, "Напиши /start для меню")
+
+print("Bot started...")
+bot.polling(none_stop=True, interval=0, timeout=20)
