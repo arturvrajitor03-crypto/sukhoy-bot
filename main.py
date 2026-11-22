@@ -1,4 +1,8 @@
-import os, time, threading, requests, math
+import os
+import time
+import threading
+import requests
+import math
 from flask import Flask
 import telebot
 
@@ -6,23 +10,47 @@ TOKEN = "9241841874:AAEzhDrKaYVetMgcyRjq3ywK2YQS0RaRib4"
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 CHAT_ID = None
-SYMBOLS = ["BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT","DOGEUSDT"]
+SYMBOLS = ["BTCUSDT"]
+SYMBOLS += ["ETHUSDT"]
+SYMBOLS += ["SOLUSDT"]
+SYMBOLS += ["BNBUSDT"]
+SYMBOLS += ["XRPUSDT"]
+SYMBOLS += ["DOGEUSDT"]
 positions = {}
 balance = 500.0
 
+# Ssylki sobiraem iz kusochkov
+# chtoby telefon ne rval ih
+H = "https://"
+T1 = "testnet.binance"
+T2 = ".vision"
+B1 = "api.binance"
+B2 = ".com"
+BASE1 = H + T1 + T2
+BASE2 = H + B1 + B2
+KLINE = "/api/v3/klines"
+PRICE = "/api/v3/ticker/price"
+
 @app.route('/')
 def home():
-    return "Mashinka FINAL ON"
+    return "Mashinka ON"
 
 def klines(s):
-    # Probue testnet, esli net - osnovnoy Binance
-    for base in ["https://testnet.binance.vision", "https://api.binance.com"]:
+    for base in [BASE1, BASE2]:
         try:
-            u = base + "/api/v3/klines"
-            p = {"symbol": s, "interval": "15m", "limit": 100}
-            r = requests.get(u, params=p, timeout=10).json()
-            if isinstance(r, list) and len(r) > 10:
-                return [float(x[4]) for x in r]
+            u = base + KLINE
+            p = {}
+            p["symbol"] = s
+            p["interval"] = "15m"
+            p["limit"] = 100
+            r = requests.get(u, params=p, timeout=10)
+            r = r.json()
+            if isinstance(r, list):
+                if len(r) > 10:
+                    out = []
+                    for x in r:
+                        out.append(float(x[4]))
+                    return out
         except:
             continue
     return []
@@ -58,13 +86,48 @@ def stoch(c):
         return 50
     return (c[-1] - low) / (high - low) * 100
 
-def macd(c):
-    if len(c) < 26:
-        return 0, 0
-    e12 = ema(c, 12)
-    e26 = ema(c, 26)
-    # uproshenny MACD
-    return e12 - e26, 0
-
 def price(s):
-    for base in ["https://testnet
+    for base in [BASE1, BASE2]:
+        try:
+            u = base + PRICE
+            p = {}
+            p["symbol"] = s
+            r = requests.get(u, params=p, timeout=10)
+            r = r.json()
+            return float(r['price'])
+        except:
+            continue
+    return None
+
+def send(t):
+    global CHAT_ID
+    if CHAT_ID:
+        try:
+            bot.send_message(CHAT_ID, t)
+        except:
+            pass
+    print(t)
+
+def analyze(s):
+    c = klines(s)
+    if not c:
+        return None
+    p = c[-1]
+    r = rsi(c)
+    e20 = ema(c, 20)
+    e50 = ema(c, 50)
+    st = stoch(c)
+    m = ema(c, 12) - ema(c, 26)
+    score = 0
+    det = []
+    if r < 50:
+        score += 1
+        det.append("RSI OK")
+    else:
+        det.append("RSI NO")
+    if p > e20:
+        score += 1
+        det.append("EMA OK")
+    else:
+        det.append("EMA NO")
+    if e20
