@@ -1,4 +1,5 @@
-import requests, time, threading
+import requests, time, threading, os
+from flask import Flask
 
 BOT_TOKEN = "ВСТАВЬ_СЮДА_СВОЙ_ТОКЕН"
 CHAT_ID = "ВСТАВЬ_СЮДА_СВОЙ_CHAT_ID"
@@ -9,6 +10,17 @@ PNL = 0.0
 POSITION = None
 SYMBOL = "BTCUSDT"
 BINANCE = "https://api.binance.com/api/v3"
+
+# --- Фейковый сайт для Render, чтобы он видел порт ---
+app = Flask(__name__)
+@app.route("/")
+def home():
+    return "Bot is alive!"
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+threading.Thread(target=run_web, daemon=True).start()
+# ----------------------------------------------------
 
 def send(text):
     try:
@@ -31,32 +43,24 @@ def telegram_poll():
             r = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates", params={"offset": offset, "timeout": 10}, timeout=15).json()
             for u in r.get("result", []):
                 offset = u["update_id"] + 1
-                msg = u.get("message", {})
-                txt = msg.get("text", "").strip()
+                txt = u.get("message", {}).get("text", "").strip()
                 print("Got:", txt)
                 if txt == "/start":
-                    send("🤖 Бот работает!\nКоманды:\n/balance - баланс\n/price - цена BTC\n/year - бэктест за год")
+                    send("🤖 Бот работает!\n/balance - баланс\n/price - цена BTC")
                 if txt == "/balance":
                     send(f"💰 Баланс: {BALANCE:.1f}$\nСделок: {TRADES}\nPnL: {PNL:.1f}$\nПозиция: {POSITION if POSITION else 'нет'}")
                 if txt == "/price":
                     p = get_price()
                     send(f"₿ BTC: {p}$")
-                if txt == "/year":
-                    send("📅 Бэктест за год: скоро будет, пока тестируем живой режим")
         except Exception as e:
             print("poll error:", e)
         time.sleep(2)
 
 def loop():
-    global BALANCE, TRADES, PNL, POSITION
     while True:
         try:
             price = get_price()
             print(f"Price: {price} Balance: {BALANCE}")
-            # Простая логика: если нет позиции - покупаем, если есть - держим
-            if POSITION is None and price > 0:
-                POSITION = price
-                send(f"🟢 Купил BTC по {price}$")
             time.sleep(60)
         except Exception as e:
             print("loop error:", e)
