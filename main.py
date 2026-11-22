@@ -3,6 +3,7 @@ import time
 import threading
 import requests
 import math
+import operator as op
 from flask import Flask
 import telebot
 
@@ -44,7 +45,7 @@ def klines(s):
             r = requests.get(u, params=p, timeout=10)
             r = r.json()
             if isinstance(r, list):
-                if len(r).__gt__(10):
+                if op.gt(len(r), 10):
                     out = []
                     for x in r:
                         out.append(float(x[4]))
@@ -54,7 +55,7 @@ def klines(s):
     return []
 
 def rsi(c):
-    if len(c).__lt__(15):
+    if op.lt(len(c), 15):
         return 50
     g = []
     l = []
@@ -64,4 +65,22 @@ def rsi(c):
         l.append(max(-d, 0))
     ag = sum(g[-14:]) / 14
     al = sum(l[-14:]) / 14
-    if al.__
+    if op.eq(al, 0):
+        return 100
+    return 100 - (100 / (1 + ag / al))
+
+def ema(c, n):
+    k = 2 / (n + 1)
+    e = c[0]
+    for p in c[1:]:
+        e = p * k + e * (1 - k)
+    return e
+
+def stoch(c):
+    if op.lt(len(c), 14):
+        return 50
+    low = min(c[-14:])
+    high = max(c[-14:])
+    if op.eq(high, low):
+        return 50
+    return (c[-1] - low) / (high - low) * 100
