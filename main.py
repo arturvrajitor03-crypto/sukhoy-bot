@@ -1,270 +1,158 @@
-import os
-import time
-import threading
-import traceback
+import os, time, threading, requests
 from flask import Flask
-from flask import request
-import telebot
 import pandas as pd
 import numpy as np
 
-TOKEN = os.environ.get("BOT_TOKEN")
-if not TOKEN:
-    TOKEN = "123456:ABC"
-APP_URL = os.environ.get(
-"RENDER_EXTERNAL_URL", "")
-APP_URL = APP_URL.rstrip("/")
-bot = telebot.TeleBot(TOKEN)
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
+SYMBOL = "BTCUSDT"
+INTERVAL = "15m"
+BALANCE = 500.0
+POSITION = None
+TRADES = 0
+PNL = 0.0
+
 app = Flask(__name__)
 
-BAL = 500.0
-POS = None
-HIST = []
-LAST = 0
+@app.route("/")
+def home():
+    return "Bot is running - SMART v2"
 
-def get_data():
-    import yfinance as yf
-    d15 = yf.download(
-    "BTC-USD",
-    period="5d",
-    interval="15m",
-    progress=False)
-    if d15.columns.nlevels > 1:
-        d15.columns = d15.columns.get_level_values(0)
-    d15 = d15.dropna()
-    d1h = yf.download(
-    "BTC-USD",
-    period="1mo",
-    interval="1h",
-    progress=False)
-    if d1h.columns.nlevels > 1:
-        d1h.columns = d1h.columns.get_level_values(0)
-    d1h = d1h.dropna()
-    s = pd.Series(
-    d15["Close"].values.flatten())
-    s1h = pd.Series(
-    d1h["Close"].values.flatten())
-    price = float(s.iloc[-1])
-    ema50 = float(
-    s.ewm(span=50).mean().iloc[-1])
-    e200 = float(
-    s1h.ewm(span=200).mean().iloc[-1])
-    if price > e200:
-        trend = "UP"
-    else:
-        trend = "DOWN"
-    delta = s.diff()
-    gain = delta.clip(
-    lower=0).rolling(14).mean()
-    loss = (-delta.clip(
-    upper=0)).rolling(14).mean()
-    g = float(
-    np.array(gain).flatten()[-1])
-    l = float(
-    np.array(loss).flatten()[-1])
-    if l != 0:
-        rsi = float(
-        100 - (100 / (1 + g / l)))
-    else:
-        rsi = 50.0
-    e12 = s.ewm(span=12).mean()
-    e26 = s.ewm(span=26).mean()
-    macd = e12 - e26
-    ms = macd.ewm(span=9).mean()
-    ma20 = s.rolling(20).mean()
-    sd = s.rolling(20).std()
-    bbu = float(
-    ma20.iloc[-1] + 2 * sd.iloc[-1])
-    bbl = float(
-    ma20.iloc[-1] - 2 * sd.iloc[-1])
-    hi = d15["High"].values.flatten()
-    lo = d15["Low"].values.flatten()
-    cl = d15["Close"].values.flatten()
-    tr1 = hi[1:] - lo[1:]
-    tr2 = abs(hi[1:] - cl[:-1])
-    tr3 = abs(lo[1:] - cl[:-1])
-    tr = np.maximum(
-    tr1, np.maximum(tr2, tr3))
-    atr = float(
-    pd.Series(tr).rolling(14).mean().iloc[-1])
-    atr = max(200, min(1500, atr))
-    h5 = float(s.max())
-    l5 = float(s.min())
-    f618 = round(
-    h5 - (h5 - l5) * 0.618, 2)
-    f382 = round(
-    h5 - (h5 - l5) * 0.382, 2)
+def send(msg):
+    try:
+        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                      json={"chat_id": CHAT_ID, "text": msg}, timeout=10)
+    except Exception as e:
+        print(e)
+
+def get_klines():
+    url = "https://api.binance.com/api/v3/klines"
+    r = requests.get(url, params={"symbol": SYMBOL, "interval": INTERVAL, "limit": 100}, timeout=10)
+    data = r.json()
+    df = pd.DataFrame(data, columns=["t","o","h","l","c","v","ct","q","n","tb","tq","x"])
+    df["c"] = df["c"].astype(float)
+    df["h"] = df["h"].astype(float)
+    df["l"] = df["l"].astype(float)
+    return df
+
+def indicators(df):
+    close = df["c"]
+    # EMA 50 / 200 - ТРЕНД
+    ema50 = close.ewm(span=50).mean().iloc[-1]
+    ema200 = close.ewm(span=200).mean().iloc[-1]
+    # RSI 14
+    delta = close.diff()
+    gain = delta.where(delta > 0, 0).rolling(14).mean()
+    loss = -delta.where(delta < 0, 0).rolling(14).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    rsi_val = rsi.iloc[-1]
+    # MACD
+    ema12 = close.ewm(span=12).mean()
+    ema26 = close.ewm(span=26).mean()
+    macd = ema12 - ema26
+    signal = macd.ewm(span=9).mean()
+    macd_val = macd.iloc[-1]
+    signal_val = signal.iloc[-1]
+    # Bollinger 20, 2
+    sma20 = close.rolling(20).mean().iloc[-1]
+    std20 = close.rolling(20).std().iloc[-1]
+    upper = sma20 + 2*std20
+    lower = sma20 - 2*std20
+    # Ширина Bollinger - фильтр флэта
+    width = (upper - lower) / sma20 * 100
+    price = close.iloc[-1]
     return {
-    "price": price,
-    "ema50": ema50,
-    "trend": trend,
-    "rsi": rsi,
-    "macd": float(
-    np.array(macd).flatten()[-1]),
-    "ms": float(
-    np.array(ms).flatten()[-1]),
-    "bbu": bbu,
-    "bbl": bbl,
-    "atr": atr,
-    "f618": f618,
-    "f382": f382
+        "price": price, "ema50": ema50, "ema200": ema200,
+        "rsi": rsi_val, "macd": macd_val, "signal": signal_val,
+        "upper": upper, "lower": lower, "width": width
     }
 
-def calc(d):
-    p = d["price"]
-    buy = 0
-    sell = 0
-    if d["trend"] == "UP":
-        buy += 3
-    else:
-        sell += 3
-    if p > d["ema50"]:
-        buy += 1
-    else:
-        sell += 1
-    if d["macd"] > d["ms"]:
-        buy += 1
-    else:
-        sell += 1
-    if 50 < d["rsi"] < 68:
-        buy += 1
-    elif 32 < d["rsi"] < 50:
-        sell += 1
-    if p <= d["bbl"] * 1.002:
-        buy += 1
-    elif p >= d["bbu"] * 0.998:
-        sell += 1
-    if abs(p - d["f618"]) < d["atr"]:
-        buy += 1
-    if abs(p - d["f382"]) < d["atr"]:
-        sell += 1
-    if buy >= 5 and buy > sell + 1:
-        return "BUY", buy
-    if sell >= 5 and sell > buy + 1:
-        return "SELL", sell
-    return "WAIT", buy
+def check_trade():
+    global BALANCE, POSITION, TRADES, PNL
+    df = get_klines()
+    ind = indicators(df)
+    price = ind["price"]
 
-def check_trade(chat_id):
-    global BAL, POS, LAST
-    try:
-        d = get_data()
-        sig, sila = calc(d)
-        p = d["price"]
-        if POS is None:
-            if sig == "WAIT":
-                return
-            if time.time() - LAST < 600:
-                return
-            if sig == "BUY":
-                sl = round(p - 600, 2)
-                tp = round(p + 900, 2)
-            else:
-                sl = round(p + 600, 2)
-                tp = round(p - 900, 2)
-            POS = {
-            "side": sig,
-            "entry": p,
-            "sl": sl,
-            "tp": tp
-            }
-            LAST = time.time()
-            bot.send_message(chat_id,
-            "DEMO BTC OPEN " + sig +
-            "\nVhod: " + str(p) +
-            "\nSL: " + str(sl) +
-            "\nTP: " + str(tp))
-            return
-        side = POS["side"]
-        entry = POS["entry"]
-        sl = POS["sl"]
-        tp = POS["tp"]
-        close = None
-        pnl = 0
-        if side == "BUY":
-            if p <= sl:
-                close = "SL"
-                pnl = (sl - entry) * 0.05
-            if p >= tp:
-                close = "TP"
-                pnl = (tp - entry) * 0.05
-        else:
-            if p >= sl:
-                close = "SL"
-                pnl = (entry - sl) * 0.05
-            if p <= tp:
-                close = "TP"
-                pnl = (tp - entry) * 0.05
-        if close is not None:
-            BAL = BAL + pnl
-            HIST.append(pnl)
-            bot.send_message(chat_id,
-            "DEMO BTC CLOSE " + close +
-            "\nPnL: " + str(round(pnl, 2)) +
-            "\nBalans: " + str(round(BAL, 2)))
-            POS = None
-    except Exception as e:
-        print("ERR " + str(e), flush=True)
+    # Если есть открытая позиция - проверяем TP / SL
+    if POSITION:
+        if POSITION["side"] == "BUY":
+            if price >= POSITION["tp"]:
+                profit = (POSITION["tp"] - POSITION["entry"]) * 0.05
+                BALANCE += profit; PNL += profit; TRADES += 1
+                send(f"✅ TP! BUY закрыта +{profit:.1f}$\nБаланс: {BALANCE:.1f}$ | Сделок: {TRADES} | PnL: {PNL:.1f}$")
+                POSITION = None
+            elif price <= POSITION["sl"]:
+                loss = (POSITION["sl"] - POSITION["entry"]) * 0.05
+                BALANCE += loss; PNL += loss; TRADES += 1
+                send(f"❌ SL! BUY закрыта {loss:.1f}$\nБаланс: {BALANCE:.1f}$ | Сделок: {TRADES} | PnL: {PNL:.1f}$")
+                POSITION = None
+        else: # SELL
+            if price <= POSITION["tp"]:
+                profit = (POSITION["entry"] - POSITION["tp"]) * 0.05
+                BALANCE += profit; PNL += profit; TRADES += 1
+                send(f"✅ TP! SELL закрыта +{profit:.1f}$\nБаланс: {BALANCE:.1f}$ | Сделок: {TRADES} | PnL: {PNL:.1f}$")
+                POSITION = None
+            elif price >= POSITION["sl"]:
+                loss = (POSITION["entry"] - POSITION["sl"]) * 0.05
+                BALANCE += loss; PNL += loss; TRADES += 1
+                send(f"❌ SL! SELL закрыта {loss:.1f}$\nБаланс: {BALANCE:.1f}$ | Сделок: {TRADES} | PnL: {PNL:.1f}$")
+                POSITION = None
+        return
 
-def loop(chat_id):
+    # Нет позиции - ищем сигнал, но ТОЛЬКО если все фильтры совпали
+    # Фильтр флэта: если Bollinger узкий < 0.8% - рынок спит, не торгуем
+    if ind["width"] < 0.8:
+        print(f"Флэт, ширина {ind['width']:.2f}% - пропускаю")
+        return
+
+    # SELL: Тренд вниз + RSI высокий + MACD вниз + цена у верхней границы
+    if ind["ema50"] < ind["ema200"] and ind["rsi"] > 60 and ind["macd"] < ind["signal"] and price > ind["upper"] - 100:
+        entry = price
+        tp = entry - 900
+        sl = entry + 600
+        POSITION = {"side": "SELL", "entry": entry, "tp": tp, "sl": sl}
+        send(f"🔴 SMART SELL BTC\nВход: {entry:.0f}\nTP: {tp:.0f} (+45$)\nSL: {sl:.0f} (-30$)\nRSI: {ind['rsi']:.1f} | EMA50<{ind['ema50']:.0f} < EMA200 {ind['ema200']:.0f}\nMACD подтверждает | Bollinger: у верха")
+        return
+
+    # BUY: Тренд вверх + RSI низкий + MACD вверх + цена у нижней границы
+    if ind["ema50"] > ind["ema200"] and ind["rsi"] < 40 and ind["macd"] > ind["signal"] and price < ind["lower"] + 100:
+        entry = price
+        tp = entry + 900
+        sl = entry - 600
+        POSITION = {"side": "BUY", "entry": entry, "tp": tp, "sl": sl}
+        send(f"🟢 SMART BUY BTC\nВход: {entry:.0f}\nTP: {tp:.0f} (+45$)\nSL: {sl:.0f} (-30$)\nRSI: {ind['rsi']:.1f} | EMA50 {ind['ema50']:.0f} > EMA200 {ind['ema200']:.0f}\nMACD подтверждает | Bollinger: у низа")
+        return
+
+    print(f"Нет сигнала. Цена {price:.0f} RSI {ind['rsi']:.1f} Width {ind['width']:.2f}%")
+
+def loop():
     while True:
-        check_trade(chat_id)
-        time.sleep(300)
+        try:
+            check_trade()
+        except Exception as e:
+            print("Ошибка:", e)
+        time.sleep(300) # 5 минут
 
-@bot.message_handler(commands=["start"])
-def start(m):
-    bot.send_message(m.chat.id,
-    "DEMO BTC BOT 500$")
+def telegram_poll():
+    offset = 0
+    while True:
+        try:
+            r = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates", params={"offset": offset, "timeout": 20}, timeout=30).json()
+            for u in r.get("result", []):
+                offset = u["update_id"] + 1
+                txt = u.get("message", {}).get("text", "")
+                if txt == "/balance":
+                    send(f"💰 Баланс: {BALANCE:.1f}$\nСделок: {TRADES}\nPnL: {PNL:.1f}$\nОткрытая: {POSITION if POSITION else 'нет'}")
+                if txt == "/start":
+                    send("🤖 SMART Bot v2 работает! EMA + RSI + MACD + Bollinger + Фильтр флэта")
+        except Exception as e:
+            print(e)
+            time.sleep(5)
 
-@bot.message_handler(commands=["check"])
-def check(m):
-    bot.send_message(m.chat.id,
-    "Proveryayu BTC...")
-    check_trade(m.chat.id)
-    if POS is None:
-        bot.send_message(m.chat.id,
-        "Net sdelki. Balans: " +
-        str(round(BAL, 2)))
-    else:
-        bot.send_message(m.chat.id,
-        "Otkrita: " + POS["side"])
-
-@bot.message_handler(commands=["balance"])
-def bal(m):
-    tot = sum(HIST)
-    bot.send_message(m.chat.id,
-    "Balans: " + str(round(BAL, 2)) +
-    "\nSdelok: " + str(len(HIST)) +
-    "\nPnL: " + str(round(tot, 2)))
-
-@bot.message_handler(commands=["auto"])
-def auto(m):
-    t = threading.Thread(
-    target=loop, args=(m.chat.id,),
-    daemon=True)
-    t.start()
-    bot.send_message(m.chat.id,
-    "AUTO BTC VKLUCHEN!")
-
-@app.route("/" + TOKEN, methods=["POST"])
-def webhook():
-    data = request.stream.read().decode("utf-8")
-    upd = telebot.types.Update.de_json(data)
-    bot.process_new_updates([upd])
-    return "OK", 200
-
-@app.route("/")
-def index():
-    return "Demo BTC Bot alive!", 200
+threading.Thread(target=loop, daemon=True).start()
+threading.Thread(target=telegram_poll, daemon=True).start()
 
 if __name__ == "__main__":
-    print("=== STARTING ===", flush=True)
-    try:
-        if os.environ.get("BOT_TOKEN"):
-            bot.remove_webhook()
-            bot.set_webhook(
-            url=APP_URL + "/" + TOKEN)
-            print("Webhook set!", flush=True)
-    except Exception as e:
-        print("Webhook error: " + str(e), flush=True)
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
