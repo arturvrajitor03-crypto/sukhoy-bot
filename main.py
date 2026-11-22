@@ -84,3 +84,53 @@ def stoch(c):
     if op.eq(high, low):
         return 50
     return (c[-1] - low) / (high - low) * 100
+
+def price(s):
+    for base in [BASE1, BASE2]:
+        try:
+            u = base + PRICE
+            p = {}
+            p["symbol"] = s
+            r = requests.get(u, params=p, timeout=10)
+            r = r.json()
+            return float(r['price'])
+        except:
+            continue
+    return None
+
+def send(t):
+    global CHAT_ID
+    if CHAT_ID:
+        try:
+            bot.send_message(CHAT_ID, t)
+        except:
+            pass
+    print(t)
+
+def analyze(s):
+    c = klines(s)
+    if not c:
+        return None
+    p = c[-1]
+    r = rsi(c)
+    e20 = ema(c, 20)
+    e50 = ema(c, 50)
+    st = stoch(c)
+    m = ema(c, 12) - ema(c, 26)
+    score = 0
+    det = []
+    if op.lt(r, 50):
+        score += 1
+        det.append("RSI OK")
+    else:
+        det.append("RSI NO")
+    if op.gt(p, e20):
+        score += 1
+        det.append("EMA OK")
+    else:
+        det.append("EMA NO")
+    if op.gt(e20, e50):
+        score += 1
+        det.append("Trend OK")
+    else:
+        det.append("
