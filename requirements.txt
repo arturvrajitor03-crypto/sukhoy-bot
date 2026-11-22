@@ -1,6 +1,5 @@
-pyTelegramBotAPI
 Flask
-Pillow
+pyTelegramBotAPI
 yfinance
 pandas
-matplotlib
+numpy
