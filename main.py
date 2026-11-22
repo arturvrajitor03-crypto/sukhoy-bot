@@ -41,4 +41,20 @@ def handle_eth(message):
 
 @bot.message_handler(commands=['all'])
 def handle_all(message):
-    b
+    btc = get_price("BTC")
+    eth = get_price("ETH")
+    sol = get_price("SOL")
+    text = (
+        f"📊 Цены:\n\n"
+        f"🪙 BTC: {btc:.2f} USDT\n"
+        f"💎 ETH: {eth:.2f} USDT\n"
+        f"◎ SOL: {sol:.2f} USDT"
+    )
+    bot.reply_to(message, text)
+
+@bot.message_handler(func=lambda m: True)
+def handle_all_messages(message):
+    bot.reply_to(message, "Напиши /start для меню")
+
+print("Bot started...")
+bot.polling(none_stop=True, interval=0, timeout=20)
