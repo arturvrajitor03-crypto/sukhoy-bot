@@ -73,17 +73,4 @@ def klines(s):
     p = {}
     p[W(115,121,109,98,111,108)] = s
     p[W(105,110,116,101,114,118,97,108)] = W(49,53,109)
-    p[W(108,105,109,105,116)] = 100
-    try:
-        r = requests.get(u, params=p, timeout=10)
-        r = r.json()
-        out = []
-        for x in r:
-            out.append(float(x[4]))
-        return out
-    except:
-        return []
-def rsi(c):
-    if len(c) < 15:
-        return 50
-    g = []
+   
