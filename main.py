@@ -114,13 +114,13 @@ def balance_text():
             tp, sl = get_tp_sl(pos)
             txt += f"\n{name}: {pos['type']} по {pos['price']:.2f} ТП {tp:.2f} СЛ {sl:.2f}"
     else:
-        txt += "\nОткрытых сделок нет - профи ждет точный вход"
+        txt += "\nОткрытых сделок нет - бот ищет вход"
     return txt
 
 async def start(update, context):
     global CHAT_ID
     CHAT_ID = update.effective_chat.id
-    msg = f"БОТ-ПРОФЕССИОНАЛ НА ВСЕ 4 РЫНКА АКТИВЕН!\n\nСлежу за:\n1. ЗОЛОТО\n2. БИТКОИН\n3. ЭФИРИУМ\n4. НЕФТЬ\n\nТолько точные входы!\nЛот: {LOT}\n\n/balance - деньги + плюсы/минусы\n/status - все позиции\n/price - цены всех 4 рынков"
+    msg = f"БОТ-АКТИВНЫЙ НА ВСЕ 4 РЫНКА!\n\nСлежу за:\n1. ЗОЛОТО\n2. БИТКОИН\n3. ЭФИРИУМ\n4. НЕФТЬ\n\nПроверка каждые 5 минут!\nЛот: {LOT}\n\n/balance - деньги\n/status - позиции\n/price - цены всех 4 рынков\n/test - открыть тестовую сделку!"
     await update.message.reply_text(msg)
 
 async def balance_cmd(update, context):
@@ -144,6 +144,19 @@ async def price_cmd(update, context):
     txt += f"\n{balance_text()}"
     await update.message.reply_text(txt)
 
+async def test_cmd(update, context):
+    closes = get_history("PAXGUSDT")
+    if not closes:
+        await update.message.reply_text("Нет данных по золоту, попробуй позже")
+        return
+    price = closes[-1]
+    if "ЗОЛОТО" in positions:
+        await update.message.reply_text("Уже есть сделка по золоту! Смотри /status")
+        return
+    positions["ЗОЛОТО"] = {"type": "BUY", "price": price, "amount": LOT * price, "lot": LOT}
+    tp, sl = get_tp_sl(positions["ЗОЛОТО"])
+    await update.message.reply_text(f"ТЕСТОВАЯ СДЕЛКА ОТКРЫТА! ЗОЛОТО BUY\nЦена: {price:.2f}\nТП: {tp:.2f}\nСЛ: {sl:.2f}\n\n{balance_text()}")
+
 async def check_gold_logic(bot):
     global BALANCE
     for name, sym in SYMBOLS.items():
@@ -157,8 +170,8 @@ async def check_gold_logic(bot):
             ema200 = calc_ema(closes, 100)
             macd, signal = calc_macd(closes)
             last_change = (closes[-1] - closes[-4]) / closes[-4] * 100
-            if abs(last_change) > 0.8:
-                print(f"{name} ПРОФИ ЖДЕТ - паника {last_change:.2f}%", flush=True)
+            if abs(last_change) > 1.5:
+                print(f"{name} ЖДЕТ - паника {last_change:.2f}%", flush=True)
                 continue
             print(f"{name} Цена {price} RSI {rsi:.1f} MACD {macd:.2f}", flush=True)
             pos = positions.get(name)
@@ -173,31 +186,31 @@ async def check_gold_logic(bot):
                     profit = amount * pnl_pct / 100
                     BALANCE += profit
                     if CHAT_ID != 0:
-                        await bot.send_message(chat_id=CHAT_ID, text=f"ПРОФИ ЗАКРЫЛ В ПЛЮС! {name} {pos['type']}\nВход: {entry:.2f}\nВыход: {price:.2f}\nПрибыль: +{profit:.2f}$\n\n{balance_text()}")
+                        await bot.send_message(chat_id=CHAT_ID, text=f"ЗАКРЫЛ В ПЛЮС! {name} {pos['type']}\nВход: {entry:.2f}\nВыход: {price:.2f}\nПрибыль: +{profit:.2f}$\n\n{balance_text()}")
                     del positions[name]
                     continue
                 if pnl_pct <= -1.5:
                     loss = amount * pnl_pct / 100
                     BALANCE += loss
                     if CHAT_ID != 0:
-                        await bot.send_message(chat_id=CHAT_ID, text=f"ПРОФИ ЗАКРЫЛ ПО СТОПУ {name} {pos['type']}\nВход: {entry:.2f}\nВыход: {price:.2f}\nУбыток: {loss:.2f}$ - стоп защитил депозит!\n\n{balance_text()}")
+                        await bot.send_message(chat_id=CHAT_ID, text=f"ЗАКРЫЛ ПО СТОПУ {name} {pos['type']}\nВход: {entry:.2f}\nВыход: {price:.2f}\nУбыток: {loss:.2f}$\n\n{balance_text()}")
                     del positions[name]
                     continue
                 continue
             amount = LOT * price
             if name in ["БИТКОИН", "ЭФИРИУМ"]:
                 amount = 500.0
-            if price > ema200 and rsi < 35 and macd > signal and price > ema50:
+            if price > ema200 and rsi < 45 and macd > signal:
                 positions[name] = {"type": "BUY", "price": price, "amount": amount, "lot": LOT}
                 tp, sl = get_tp_sl(positions[name])
                 if CHAT_ID != 0:
-                    await bot.send_message(chat_id=CHAT_ID, text=f"ПРОФИ СИГНАЛ ПОКУПКА! {name}\n\nТренд ВВЕРХ\nRSI: {rsi:.1f} - дешево!\nMACD подтверждает разворот\n\nЦена: {price:.2f}\nЛот: {LOT}\nТП: {tp:.2f}\nСЛ: {sl:.2f}\n\n{balance_text()}")
+                    await bot.send_message(chat_id=CHAT_ID, text=f"СИГНАЛ ПОКУПКА! {name}\n\nТренд ВВЕРХ\nRSI: {rsi:.1f}\nMACD подтверждает\n\nЦена: {price:.2f}\nЛот: {LOT}\nТП: {tp:.2f}\nСЛ: {sl:.2f}\n\n{balance_text()}")
                 continue
-            if price < ema200 and rsi > 65 and macd < signal and price < ema50:
+            if price < ema200 and rsi > 55 and macd < signal:
                 positions[name] = {"type": "SELL", "price": price, "amount": amount, "lot": LOT}
                 tp, sl = get_tp_sl(positions[name])
                 if CHAT_ID != 0:
-                    await bot.send_message(chat_id=CHAT_ID, text=f"ПРОФИ СИГНАЛ ПРОДАЖА! {name}\n\nТренд ВНИЗ\nRSI: {rsi:.1f} - дорого!\nMACD подтверждает разворот\n\nЦена: {price:.2f}\nЛот: {LOT}\nТП: {tp:.2f}\nСЛ: {sl:.2f}\n\n{balance_text()}")
+                    await bot.send_message(chat_id=CHAT_ID, text=f"СИГНАЛ ПРОДАЖА! {name}\n\nТренд ВНИЗ\nRSI: {rsi:.1f}\nMACD подтверждает\n\nЦена: {price:.2f}\nЛот: {LOT}\nТП: {tp:.2f}\nСЛ: {sl:.2f}\n\n{balance_text()}")
                 continue
         except Exception as e:
             print(f"Ошибка {name}: {e}", flush=True)
@@ -210,15 +223,16 @@ def run_bot():
     asyncio.set_event_loop(loop)
     while True:
         try:
-            print("Запускаем Бота на 4 рынка...", flush=True)
+            print("Запускаем Бота...", flush=True)
             app = ApplicationBuilder().token(TOKEN).build()
             app.add_handler(CommandHandler("start", start))
             app.add_handler(CommandHandler("price", price_cmd))
             app.add_handler(CommandHandler("status", status_cmd))
             app.add_handler(CommandHandler("balance", balance_cmd))
+            app.add_handler(CommandHandler("test", test_cmd))
             if app.job_queue:
-                app.job_queue.run_repeating(check_gold_job, interval=900, first=10)
-            print("Бот на 4 рынка запущен!", flush=True)
+                app.job_queue.run_repeating(check_gold_job, interval=300, first=10)
+            print("Бот запущен!", flush=True)
             app.run_polling(drop_pending_updates=True, stop_signals=None)
         except Exception as e:
             print(f"Бот упал, перезапуск: {e}", flush=True)
