@@ -56,13 +56,13 @@ def get_gold_price():
 
 def make_signal(price):
     global last_signal
-    if price >= 2700:
+    if price >= 3750:
         signal = "PRODAZHA - Cena ochen vysoko, zhdem otkat"
-    elif price >= 2650:
+    elif price >= 3680:
         signal = "OSTOROZHNO - Cena vysoko, ne pokupaem"
-    elif price <= 2600:
+    elif price <= 3580:
         signal = "POKUPKA - Cena nizko, horoshiy vhod"
-    elif price <= 2550:
+    elif price <= 3520:
         signal = "SILNAYA POKUPKA - Cena ochen nizko"
     else:
         signal = "ZHDEM - Cena v seredine, bez sdelki"
