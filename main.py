@@ -89,7 +89,7 @@ def balance_text():
     znak = "+" if profit >= 0 else ""
     txt = f"VIRTUALNIY SCHET\n\nStart: {START_BALANCE:.2f}$\nSeychas: {BALANCE:.2f}$\nPribil: {znak}{profit:.2f}$\n"
     if position:
-        txt += f"\nOtkrita: POKUPKA {position['amount']}$ po {position['price']:.2f}"
+        txt += f"\nOtkrita: {position['type']} {position['amount']}$ po {position['price']:.2f}"
     else:
         txt += "\nOtkritih sdelok net"
     return txt
@@ -97,7 +97,7 @@ def balance_text():
 async def start(update, context):
     global CHAT_ID
     CHAT_ID = update.effective_chat.id
-    await update.message.reply_text(f"Bot PRO rabotaet!\n\nIndikatori: RSI + EMA50\nVirtual: 500$\n\n/balance - deneg\n/status - pozicii\n/price - cena")
+    await update.message.reply_text(f"Bot PRO AKTIVNIY rabotaet!\n\nBUY + SELL - v obe storoni!\nVirtual: 500$\n\n/balance - deneg\n/status - pozicii\n/price - cena")
 
 async def balance_cmd(update, context):
     await update.message.reply_text(balance_text())
@@ -123,32 +123,54 @@ async def check_gold_logic(bot):
         closes = get_history()
         rsi = calc_rsi(closes)
         ema = calc_ema(closes, 50, price)
-        print(f"Check Price {price} RSI {rsi:.1f} EMA {ema:.2f} Bal {BALANCE}", flush=True)
+        print(f"Check Price {price} RSI {rsi:.1f} EMA {ema:.2f} Bal {BALANCE} Pos {position}", flush=True)
+
+        # --- ESLI EST OTKRYTA SDELKA - PROVERYAEM ZAKRYTIE ---
         if position:
             entry = position['price']
-            pnl_pct = (price - entry) / entry * 100
+            if position['type'] == 'BUY':
+                pnl_pct = (price - entry) / entry * 100
+            else:  # SELL
+                pnl_pct = (entry - price) / entry * 100
+
             if pnl_pct >= 2.0:
                 profit = TRADE_AMOUNT * pnl_pct / 100
                 BALANCE += profit
                 if CHAT_ID != 0:
-                    await bot.send_message(chat_id=CHAT_ID, text=f"✅ PRODALI V PLYUS!\nVhod: {entry:.2f}\nVihod: {price:.2f}\nPribil: +{profit:.2f}$\n\n{balance_text()}")
+                    await bot.send_message(chat_id=CHAT_ID, text=f"✅ ZAKRYLI V PLYUS! {position['type']}\nVhod: {entry:.2f}\nVihod: {price:.2f}\nPribil: +{profit:.2f}$\n\n{balance_text()}")
                 position = None
                 return
             if pnl_pct <= -1.5:
                 loss = TRADE_AMOUNT * pnl_pct / 100
                 BALANCE += loss
                 if CHAT_ID != 0:
-                    await bot.send_message(chat_id=CHAT_ID, text=f"🛑 STOP-LOSS\nVhod: {entry:.2f}\nVihod: {price:.2f}\nUbitok: {loss:.2f}$\n\n{balance_text()}")
+                    await bot.send_message(chat_id=CHAT_ID, text=f"🛑 STOP-LOSS {position['type']}\nVhod: {entry:.2f}\nVihod: {price:.2f}\nUbitok: {loss:.2f}$\n\n{balance_text()}")
                 position = None
                 return
             return
-        if rsi < 35 and price > ema:
-            position = {'price': price, 'amount': TRADE_AMOUNT}
+
+        # --- NET SDELKI - ISHEM NOVUYU, V OBE STORONI ---
+        # 1. BUY - deshevo + trend vverh
+        if rsi < 40 and price > ema:
+            position = {'type': 'BUY', 'price': price, 'amount': TRADE_AMOUNT}
             if CHAT_ID != 0:
-                await bot.send_message(chat_id=CHAT_ID, text=f"🟢 SILNIY SIGNAL POKUPKA!\nCena: {price:.2f}\nRSI: {rsi:.1f} - deshevo!\nEMA50: {ema:.2f} - trend vverh\nSumma: {TRADE_AMOUNT}$\n\n{balance_text()}")
-        elif rsi > 70:
+                await bot.send_message(chat_id=CHAT_ID, text=f"🟢 SIGNAL BUY!\nCena: {price:.2f}\nRSI: {rsi:.1f} - deshevo!\nEMA50: {ema:.2f} - trend vverh\nSumma: {TRADE_AMOUNT}$\n\n{balance_text()}")
+            return
+
+        # 2. SELL - dorogo + trend vniz
+        if rsi > 60 and price < ema:
+            position = {'type': 'SELL', 'price': price, 'amount': TRADE_AMOUNT}
             if CHAT_ID != 0:
-                await bot.send_message(chat_id=CHAT_ID, text=f"🔴 PEREKUPLEN - RSI {rsi:.1f}\nCena {price:.2f} visoko, zhdem.\n\n{balance_text()}")
+                await bot.send_message(chat_id=CHAT_ID, text=f"🔴 SIGNAL SELL!\nCena: {price:.2f}\nRSI: {rsi:.1f} - dorogo!\nEMA50: {ema:.2f} - trend vniz\nSumma: {TRADE_AMOUNT}$\n\n{balance_text()}")
+            return
+
+        # 3. SELL esli ochen perekuplen, dazhe bez trenda - chtob bil aktivnim
+        if rsi > 75:
+            position = {'type': 'SELL', 'price': price, 'amount': TRADE_AMOUNT}
+            if CHAT_ID != 0:
+                await bot.send_message(chat_id=CHAT_ID, text=f"🔴 SIGNAL SELL! PEREKUPLEN!\nCena: {price:.2f}\nRSI: {rsi:.1f} - ochen dorogo!\nSumma: {TRADE_AMOUNT}$\n\n{balance_text()}")
+            return
+
     except Exception as e:
         print(f"Check oshibka: {e}", flush=True)
 
@@ -156,7 +178,6 @@ async def check_gold_job(context):
     await check_gold_logic(context.bot)
 
 def run_bot():
-    # VAZHNO: otdelniy event loop dlya potoka
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     while True:
@@ -170,7 +191,6 @@ def run_bot():
             if app.job_queue:
                 app.job_queue.run_repeating(check_gold_job, interval=900, first=10)
             print("Bot PRO zapushchen!", flush=True)
-            # stop_signals=None - pozvolyaet rabotat v fone!
             app.run_polling(drop_pending_updates=True, stop_signals=None)
         except Exception as e:
             print(f"Bot upal, perezapusk: {e}", flush=True)
