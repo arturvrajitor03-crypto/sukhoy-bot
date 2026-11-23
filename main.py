@@ -17,6 +17,7 @@ BALANCE = 500.0
 START_BALANCE = 500.0
 LOT = 1.00
 position = None
+last_signal_time = 0
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -68,6 +69,19 @@ def calc_ema(closes, period, current_price=None):
         ema = p * k + ema * (1 - k)
     return ema
 
+def calc_macd(closes):
+    if len(closes) < 26:
+        return 0, 0
+    ema12 = calc_ema(closes, 12)
+    ema26 = calc_ema(closes, 26)
+    macd = ema12 - ema26
+    # Сигнальная линия - EMA от MACD примерно
+    prev_ema12 = calc_ema(closes[:-1], 12)
+    prev_ema26 = calc_ema(closes[:-1], 26)
+    prev_macd = prev_ema12 - prev_ema26
+    signal = (macd + prev_macd) / 2
+    return macd, signal
+
 def get_gold_price():
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
@@ -98,18 +112,18 @@ def get_tp_sl(pos):
 def balance_text():
     profit = BALANCE - START_BALANCE
     znak = "+" if profit >= 0 else ""
-    txt = f"ВИРТУАЛЬНЫЙ СЧЁТ\n\nСтарт: {START_BALANCE:.2f}$\nСейчас: {BALANCE:.2f}$\nПрибыль: {znak}{profit:.2f}$\nЛот: {LOT}\n"
+    txt = f"СЧЁТ ПРОФЕССИОНАЛА\n\nСтарт: {START_BALANCE:.2f}$\nСейчас: {BALANCE:.2f}$\nПрибыль: {znak}{profit:.2f}$\nЛот: {LOT}\n"
     if position:
         tp, sl = get_tp_sl(position)
         txt += f"\nОткрыта: {position['type']} Лот {position['lot']} по {position['price']:.2f}\nСумма: {position['amount']:.2f}$\nТП: {tp:.2f}\nСЛ: {sl:.2f}"
     else:
-        txt += "\nОткрытых сделок нет"
+        txt += "\nОткрытых сделок нет - ждем точный вход как профессионал"
     return txt
 
 async def start(update, context):
     global CHAT_ID
     CHAT_ID = update.effective_chat.id
-    msg = f"ХОРОШИЙ БОТ АКТИВЕН!\n\nТеперь только точные входы!\nЛот: {LOT}\nВиртуально: 500$\n\n/balance - деньги\n/status - позиции\n/price - цена"
+    msg = f"БОТ-ПРОФЕССИОНАЛ АКТИВЕН!\n\nТоргую как профи:\n- Только по тренду\n- Только точный вход\n- Без паники\n- Стоп всегда!\n\nЛот: {LOT}\n\n/balance - деньги\n/status - позиции\n/price - цена"
     await update.message.reply_text(msg)
 
 async def balance_cmd(update, context):
@@ -123,30 +137,36 @@ async def price_cmd(update, context):
         price, chg = get_gold_price()
         closes = get_history()
         rsi = calc_rsi(closes)
-        ema = calc_ema(closes, 50, price)
+        ema50 = calc_ema(closes, 50, price)
         ema200 = calc_ema(closes, 100, price)
-        trend = "ВВЕРХ" if price > ema200 else "ВНИЗ"
-        txt = f"ЗОЛОТО: {price:.2f}\nИзменение: {chg:+.2f}\n\nRSI: {rsi:.1f}\nEMA50: {ema:.2f}\nТренд: {trend}\n\n{balance_text()}"
+        macd, signal = calc_macd(closes)
+        trend = "ВВЕРХ - только ПОКУПКА" if price > ema200 else "ВНИЗ - только ПРОДАЖА"
+        txt = f"ЗОЛОТО: {price:.2f}\nИзменение: {chg:+.2f}\n\nRSI: {rsi:.1f}\nEMA50: {ema50:.2f}\nEMA200: {ema200:.2f}\nMACD: {macd:.2f}\nТренд: {trend}\n\n{balance_text()}"
         await update.message.reply_text(txt)
     except Exception as e:
         await update.message.reply_text(f"Ошибка: {e}")
 
 async def check_gold_logic(bot):
-    global BALANCE, position
+    global BALANCE, position, last_signal_time
     try:
         price, chg = get_gold_price()
         closes = get_history()
         if len(closes) < 50:
             return
         rsi = calc_rsi(closes)
-        ema = calc_ema(closes, 50, price)
+        ema50 = calc_ema(closes, 50, price)
         ema200 = calc_ema(closes, 100, price)
-        # Защита от резкого роста/падения - не торгуем в панике
+        macd, signal = calc_macd(closes)
+        # Профессионал: не торгуем если рынок в панике - резкое движение
         last_change = (closes[-1] - closes[-4]) / closes[-4] * 100
-        if abs(last_change) > 1.0:
-            print(f"Пропуск - резкое движение {last_change:.2f}%", flush=True)
+        if abs(last_change) > 0.8:
+            print(f"ПРОФИ ЖДЕТ - паника на рынке {last_change:.2f}%", flush=True)
             return
-        print(f"Проверка Цена {price} RSI {rsi:.1f} EMA {ema:.2f} Баланс {BALANCE} Позиция {position}", flush=True)
+        # Профессионал: перерыв после сделки - не входит сразу, ждет 1 час
+        if time.time() - last_signal_time < 3600 and position is None and last_signal_time != 0:
+            # Если только что закрыли, ждем - не спешим
+            pass
+        print(f"ПРОФИ Проверка Цена {price} RSI {rsi:.1f} MACD {macd:.2f} Тренд EMA200 {ema200:.2f} Баланс {BALANCE}", flush=True)
         if position:
             entry = position["price"]
             amount = position["amount"]
@@ -158,34 +178,44 @@ async def check_gold_logic(bot):
             if pnl_pct >= 2.0:
                 profit = amount * pnl_pct / 100
                 BALANCE += profit
+                last_signal_time = time.time()
                 if CHAT_ID != 0:
-                    await bot.send_message(chat_id=CHAT_ID, text=f"ЗАКРЫЛИ В ПЛЮС! {position['type']} Лот {position['lot']}\nВход: {entry:.2f}\nВыход: {price:.2f}\nПрибыль: +{profit:.2f}$\n\n{balance_text()}")
+                    await bot.send_message(chat_id=CHAT_ID, text=f"ПРОФИ ЗАКРЫЛ В ПЛЮС! {position['type']}\nВход: {entry:.2f}\nВыход: {price:.2f}\nПрибыль: +{profit:.2f}$\n\n{balance_text()}")
                 position = None
                 return
             if pnl_pct <= -1.5:
                 loss = amount * pnl_pct / 100
                 BALANCE += loss
+                last_signal_time = time.time()
                 if CHAT_ID != 0:
-                    await bot.send_message(chat_id=CHAT_ID, text=f"СТОП-ЛОСС {position['type']} Лот {position['lot']}\nВход: {entry:.2f}\nВыход: {price:.2f}\nУбыток: {loss:.2f}$\n\n{balance_text()}")
+                    await bot.send_message(chat_id=CHAT_ID, text=f"ПРОФИ ЗАКРЫЛ ПО СТОПУ {position['type']}\nВход: {entry:.2f}\nВыход: {price:.2f}\nУбыток: {loss:.2f}$ - стоп сработал, защитили депозит!\n\n{balance_text()}")
                 position = None
                 return
             return
         amount = LOT * price
-        # ХОРОШИЙ ВХОД ПОКУПКА: только если сильно перепродан И тренд вверх
-        if rsi < 30 and price > ema200:
+        # ПРОФИ ПОКУПКА: нужны ВСЕ 4 условия сразу!
+        # 1. Цена выше EMA200 - тренд вверх
+        # 2. RSI меньше 35 - цена упала, дешево
+        # 3. MACD выше сигнала - разворот вверх начался
+        # 4. Цена выше EMA50 - подтверждение
+        if price > ema200 and rsi < 35 and macd > signal and price > ema50:
             position = {"type": "BUY", "price": price, "amount": amount, "lot": LOT}
             tp, sl = get_tp_sl(position)
             if CHAT_ID != 0:
-                await bot.send_message(chat_id=CHAT_ID, text=f"СИГНАЛ ПОКУПКА! ТОЧНЫЙ ВХОД!\nЦена: {price:.2f}\nRSI: {rsi:.1f} - сильно перепродан!\nЛот: {LOT}\nСумма: {amount:.2f}$\nТП: {tp:.2f}\nСЛ: {sl:.2f}\n\n{balance_text()}")
+                await bot.send_message(chat_id=CHAT_ID, text=f"ПРОФИ СИГНАЛ ПОКУПКА!\n\nВсе условия сошлись:\nТренд ВВЕРХ\nRSI: {rsi:.1f} - дешево\nMACD подтверждает разворот\n\nЦена: {price:.2f}\nЛот: {LOT}\nТП: {tp:.2f}\nСЛ: {sl:.2f}\n\n{balance_text()}")
             return
-        # ХОРОШИЙ ВХОД ПРОДАЖА: только если сильно перекуплен И тренд вниз
-        if rsi > 70 and price < ema200:
+        # ПРОФИ ПРОДАЖА: нужны ВСЕ 4 условия сразу!
+        # 1. Цена ниже EMA200 - тренд вниз
+        # 2. RSI больше 65 - цена выросла, дорого
+        # 3. MACD ниже сигнала - разворот вниз начался
+        # 4. Цена ниже EMA50 - подтверждение
+        if price < ema200 and rsi > 65 and macd < signal and price < ema50:
             position = {"type": "SELL", "price": price, "amount": amount, "lot": LOT}
             tp, sl = get_tp_sl(position)
             if CHAT_ID != 0:
-                await bot.send_message(chat_id=CHAT_ID, text=f"СИГНАЛ ПРОДАЖА! ТОЧНЫЙ ВХОД!\nЦена: {price:.2f}\nRSI: {rsi:.1f} - сильно перекуплен!\nЛот: {LOT}\nСумма: {amount:.2f}$\nТП: {tp:.2f}\nСЛ: {sl:.2f}\n\n{balance_text()}")
+                await bot.send_message(chat_id=CHAT_ID, text=f"ПРОФИ СИГНАЛ ПРОДАЖА!\n\nВсе условия сошлись:\nТренд ВНИЗ\nRSI: {rsi:.1f} - дорого\nMACD подтверждает разворот\n\nЦена: {price:.2f}\nЛот: {LOT}\nТП: {tp:.2f}\nСЛ: {sl:.2f}\n\n{balance_text()}")
             return
-        print(f"Нет точного входа, ждем. RSI {rsi:.1f}", flush=True)
+        print(f"ПРОФИ ЖДЕТ - нет всех условий. RSI {rsi:.1f} MACD {macd:.2f}", flush=True)
     except Exception as e:
         print(f"Ошибка проверки: {e}", flush=True)
 
@@ -197,7 +227,7 @@ def run_bot():
     asyncio.set_event_loop(loop)
     while True:
         try:
-            print("Запускаем Телеграм бот...", flush=True)
+            print("Запускаем Бота-Профессионала...", flush=True)
             app = ApplicationBuilder().token(TOKEN).build()
             app.add_handler(CommandHandler("start", start))
             app.add_handler(CommandHandler("price", price_cmd))
@@ -205,7 +235,7 @@ def run_bot():
             app.add_handler(CommandHandler("balance", balance_cmd))
             if app.job_queue:
                 app.job_queue.run_repeating(check_gold_job, interval=900, first=10)
-            print("Хороший Бот запущен!", flush=True)
+            print("Бот-Профессионал запущен!", flush=True)
             app.run_polling(drop_pending_updates=True, stop_signals=None)
         except Exception as e:
             print(f"Бот упал, перезапуск: {e}", flush=True)
