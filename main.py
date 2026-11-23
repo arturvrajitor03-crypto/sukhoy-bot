@@ -16,6 +16,7 @@ PORT = int(os.getenv("PORT", "10000"))
 BALANCE = 500.0
 START_BALANCE = 500.0
 LOT = 1.00
+MAX_PER_SYMBOL = 2
 
 SYMBOLS = {
     "ЗОЛОТО": "PAXGUSDT",
@@ -104,10 +105,17 @@ def get_tp_sl(pos):
     else:
         return entry * 0.98, entry * 1.015
 
+def count_for(name):
+    c = 0
+    for k in positions.keys():
+        if k.startswith(name):
+            c += 1
+    return c
+
 def balance_text():
     profit = BALANCE - START_BALANCE
     znak = "+" if profit >= 0 else ""
-    txt = f"СЧЁТ ПРОФЕССИОНАЛА - ВСЕ 4 РЫНКА\n\nСтарт: {START_BALANCE:.2f}$\nСейчас: {BALANCE:.2f}$\nПрибыль: {znak}{profit:.2f}$\nЛот: {LOT}\n"
+    txt = f"СЧЁТ АГРЕССИВНЫЙ - 8 СДЕЛОК MAX\n\nСтарт: {START_BALANCE:.2f}$\nСейчас: {BALANCE:.2f}$\nПрибыль: {znak}{profit:.2f}$\nЛот: {LOT}\n"
     if positions:
         txt += "\n--- ОТКРЫТЫЕ СДЕЛКИ ---\n"
         for name, pos in positions.items():
@@ -120,7 +128,7 @@ def balance_text():
 async def start(update, context):
     global CHAT_ID
     CHAT_ID = update.effective_chat.id
-    msg = f"БОТ-АКТИВНЫЙ НА ВСЕ 4 РЫНКА!\n\nСлежу за:\n1. ЗОЛОТО\n2. БИТКОИН\n3. ЭФИРИУМ\n4. НЕФТЬ\n\nПроверка каждые 5 минут!\nЛот: {LOT}\n\n/balance - деньги\n/status - позиции\n/price - цены всех 4 рынков\n/test - открыть тестовую сделку!"
+    msg = f"БОТ-АГРЕССИВНЫЙ АКТИВЕН!\n\nПо 2 сделки на каждый рынок!\nВсего максимум 8 сделок!\n1. ЗОЛОТО x2\n2. БИТКОИН x2\n3. ЭФИРИУМ x2\n4. НЕФТЬ x2\n\nПроверка каждые 5 минут!\n\n/balance - деньги\n/status - позиции\n/price - цены\n/test - открыть 2 тестовые сделки!"
     await update.message.reply_text(msg)
 
 async def balance_cmd(update, context):
@@ -140,22 +148,26 @@ async def price_cmd(update, context):
         rsi = calc_rsi(closes)
         ema200 = calc_ema(closes, 100)
         trend = "ВВЕРХ" if price > ema200 else "ВНИЗ"
-        txt += f"{name}: {price:.2f} | RSI {rsi:.1f} | Тренд {trend}\n"
+        txt += f"{name}: {price:.2f} | RSI {rsi:.1f} | Тренд {trend} | Сделок: {count_for(name)}/2\n"
     txt += f"\n{balance_text()}"
     await update.message.reply_text(txt)
 
 async def test_cmd(update, context):
     closes = get_history("PAXGUSDT")
     if not closes:
-        await update.message.reply_text("Нет данных по золоту, попробуй позже")
+        await update.message.reply_text("Нет данных по золоту")
         return
     price = closes[-1]
-    if "ЗОЛОТО" in positions:
-        await update.message.reply_text("Уже есть сделка по золоту! Смотри /status")
+    opened = 0
+    for i in range(2):
+        key = f"ЗОЛОТО #{i+1}"
+        if key not in positions:
+            positions[key] = {"type": "BUY", "price": price, "amount": LOT * price, "lot": LOT}
+            opened += 1
+    if opened == 0:
+        await update.message.reply_text("Уже 2 сделки по золоту! Смотри /status")
         return
-    positions["ЗОЛОТО"] = {"type": "BUY", "price": price, "amount": LOT * price, "lot": LOT}
-    tp, sl = get_tp_sl(positions["ЗОЛОТО"])
-    await update.message.reply_text(f"ТЕСТОВАЯ СДЕЛКА ОТКРЫТА! ЗОЛОТО BUY\nЦена: {price:.2f}\nТП: {tp:.2f}\nСЛ: {sl:.2f}\n\n{balance_text()}")
+    await update.message.reply_text(f"ОТКРЫЛА {opened} ТЕСТОВЫЕ СДЕЛКИ ПО ЗОЛОТУ!\nЦена: {price:.2f}\n\n{balance_text()}")
 
 async def check_gold_logic(bot):
     global BALANCE
@@ -171,11 +183,13 @@ async def check_gold_logic(bot):
             macd, signal = calc_macd(closes)
             last_change = (closes[-1] - closes[-4]) / closes[-4] * 100
             if abs(last_change) > 1.5:
-                print(f"{name} ЖДЕТ - паника {last_change:.2f}%", flush=True)
                 continue
-            print(f"{name} Цена {price} RSI {rsi:.1f} MACD {macd:.2f}", flush=True)
-            pos = positions.get(name)
-            if pos:
+            print(f"{name} Цена {price} RSI {rsi:.1f} Сделок {count_for(name)}", flush=True)
+            keys = [k for k in list(positions.keys()) if k.startswith(name)]
+            for key in keys:
+                pos = positions.get(key)
+                if not pos:
+                    continue
                 entry = pos["price"]
                 amount = pos["amount"]
                 if pos["type"] == "BUY":
@@ -186,31 +200,36 @@ async def check_gold_logic(bot):
                     profit = amount * pnl_pct / 100
                     BALANCE += profit
                     if CHAT_ID != 0:
-                        await bot.send_message(chat_id=CHAT_ID, text=f"ЗАКРЫЛ В ПЛЮС! {name} {pos['type']}\nВход: {entry:.2f}\nВыход: {price:.2f}\nПрибыль: +{profit:.2f}$\n\n{balance_text()}")
-                    del positions[name]
+                        await bot.send_message(chat_id=CHAT_ID, text=f"ЗАКРЫЛ В ПЛЮС! {key} {pos['type']}\nВход: {entry:.2f}\nВыход: {price:.2f}\nПрибыль: +{profit:.2f}$\n\n{balance_text()}")
+                    del positions[key]
                     continue
                 if pnl_pct <= -1.5:
                     loss = amount * pnl_pct / 100
                     BALANCE += loss
                     if CHAT_ID != 0:
-                        await bot.send_message(chat_id=CHAT_ID, text=f"ЗАКРЫЛ ПО СТОПУ {name} {pos['type']}\nВход: {entry:.2f}\nВыход: {price:.2f}\nУбыток: {loss:.2f}$\n\n{balance_text()}")
-                    del positions[name]
+                        await bot.send_message(chat_id=CHAT_ID, text=f"ЗАКРЫЛ ПО СТОПУ {key} {pos['type']}\nВход: {entry:.2f}\nВыход: {price:.2f}\nУбыток: {loss:.2f}$\n\n{balance_text()}")
+                    del positions[key]
                     continue
+            if count_for(name) >= MAX_PER_SYMBOL:
                 continue
             amount = LOT * price
             if name in ["БИТКОИН", "ЭФИРИУМ"]:
                 amount = 500.0
             if price > ema200 and rsi < 45 and macd > signal:
-                positions[name] = {"type": "BUY", "price": price, "amount": amount, "lot": LOT}
-                tp, sl = get_tp_sl(positions[name])
+                n = count_for(name) + 1
+                key = f"{name} #{n}"
+                positions[key] = {"type": "BUY", "price": price, "amount": amount, "lot": LOT}
+                tp, sl = get_tp_sl(positions[key])
                 if CHAT_ID != 0:
-                    await bot.send_message(chat_id=CHAT_ID, text=f"СИГНАЛ ПОКУПКА! {name}\n\nТренд ВВЕРХ\nRSI: {rsi:.1f}\nMACD подтверждает\n\nЦена: {price:.2f}\nЛот: {LOT}\nТП: {tp:.2f}\nСЛ: {sl:.2f}\n\n{balance_text()}")
+                    await bot.send_message(chat_id=CHAT_ID, text=f"СИГНАЛ ПОКУПКА! {key}\nRSI: {rsi:.1f}\nЦена: {price:.2f}\nТП: {tp:.2f} СЛ: {sl:.2f}\n\n{balance_text()}")
                 continue
             if price < ema200 and rsi > 55 and macd < signal:
-                positions[name] = {"type": "SELL", "price": price, "amount": amount, "lot": LOT}
-                tp, sl = get_tp_sl(positions[name])
+                n = count_for(name) + 1
+                key = f"{name} #{n}"
+                positions[key] = {"type": "SELL", "price": price, "amount": amount, "lot": LOT}
+                tp, sl = get_tp_sl(positions[key])
                 if CHAT_ID != 0:
-                    await bot.send_message(chat_id=CHAT_ID, text=f"СИГНАЛ ПРОДАЖА! {name}\n\nТренд ВНИЗ\nRSI: {rsi:.1f}\nMACD подтверждает\n\nЦена: {price:.2f}\nЛот: {LOT}\nТП: {tp:.2f}\nСЛ: {sl:.2f}\n\n{balance_text()}")
+                    await bot.send_message(chat_id=CHAT_ID, text=f"СИГНАЛ ПРОДАЖА! {key}\nRSI: {rsi:.1f}\nЦена: {price:.2f}\nТП: {tp:.2f} СЛ: {sl:.2f}\n\n{balance_text()}")
                 continue
         except Exception as e:
             print(f"Ошибка {name}: {e}", flush=True)
