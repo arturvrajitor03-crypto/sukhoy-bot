@@ -1,43 +1,37 @@
 import os
-import asyncio
 import logging
 import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-logging.basicConfig(level=logging.INFO)
+# Логи чтобы видеть в Render что происходит
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = int(os.getenv("CHAT_ID", "0"))
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Бот активный запущен! 🔥\nБуду слать сигналы по золоту каждые 15 минут.")
+# Храним прошлую цену чтобы не спамить
+last_price = 0
+last_signal = ""
 
-async def check_gold(context: ContextTypes.DEFAULT_TYPE):
-    try:
-        r = requests.get("https://data-asg.goldprice.org/dbXRates/USD", timeout=10)
-        price = r.json()["items"][0]["curr"]
-        print(f"Price {price}", flush=True)
+def get_gold_price():
+    """Берем цену золота с бесплатного API"""
+    r = requests.get("https://data-asg.goldprice.org/dbXRates/USD", timeout=15)
+    data = r.json()
+    item = data["items"][0]
+    return float(item["curr"]), float(item["xauPrice"]), float(item["chg"])
 
-        # Простая логика: если цена круглая - сигнал
-        msg = f"📊 Золото сейчас: ${price:.2f}\nСледим за уровнем 2600 / 2700"
-        if CHAT_ID != 0:
-            await context.bot.send_message(chat_id=CHAT_ID, text=msg)
-    except Exception as e:
-        print(f"Ошибка проверки: {e}", flush=True)
-
-async def main():
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-
-    # Будильник каждые 15 минут
-    if app.job_queue:
-        app.job_queue.run_repeating(check_gold, interval=900, first=10)
+def make_signal(price):
+    """Простая логика сигнала"""
+    global last_signal
+    signal = ""
+    if price >= 2700:
+        signal = "🔴 ПРОДАЖА - Цена очень высоко, ждем откат вниз"
+    elif price >= 2650:
+        signal = "🟡 ОСТОРОЖНО - Цена высоко, не покупаем"
+    elif price <= 2600:
+        signal = "🟢 ПОКУПКА - Цена низко, хороший вход"
+    elif price <= 2550:
+        signal = "🟢🟢 СИЛЬНАЯ ПОКУПКА - Цена очень низко"
     else:
-        print("Нет job_queue!", flush=True)
-
-    print("Бот запущен!", flush=True)
-    await app.run_polling()
-
-if __name__ == "__main__":
-    asyncio.run(main())
+        signal = "⚪ ЖДЕМ
