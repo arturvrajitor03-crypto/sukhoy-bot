@@ -78,4 +78,21 @@ def calc_ema(closes, period):
     if not closes:
         return 0
     if len(closes) < period:
-        return closes
+        return closes[-1]
+    k = 2 / (period + 1)
+    ema = closes[0]
+    for p in closes[1:]:
+        ema = p * k + ema * (1 - k)
+    return ema
+
+def calc_macd(closes):
+    if len(closes) < 26:
+        return 0, 0
+    ema12 = calc_ema(closes, 12)
+    ema26 = calc_ema(closes, 26)
+    macd = ema12 - ema26
+    prev_ema12 = calc_ema(closes[:-1], 12)
+    prev_ema26 = calc_ema(closes[:-1], 26)
+    prev_macd = prev_ema12 - prev_ema26
+    signal = (macd + prev_macd) / 2
+    return macd, signal
