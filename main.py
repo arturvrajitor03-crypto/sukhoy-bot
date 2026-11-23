@@ -96,3 +96,146 @@ def calc_macd(closes):
     prev_macd = prev_ema12 - prev_ema26
     signal = (macd + prev_macd) / 2
     return macd, signal
+
+def get_tp_sl(pos):
+    entry = pos["price"]
+    if pos["type"] == "BUY":
+        return entry * 1.02, entry * 0.985
+    else:
+        return entry * 0.98, entry * 1.015
+
+def balance_text():
+    profit = BALANCE - START_BALANCE
+    znak = "+" if profit >= 0 else ""
+    txt = f"СЧЁТ ПРОФЕССИОНАЛА - ВСЕ 4 РЫНКА\n\nСтарт: {START_BALANCE:.2f}$\nСейчас: {BALANCE:.2f}$\nПрибыль: {znak}{profit:.2f}$\nЛот: {LOT}\n"
+    if positions:
+        txt += "\n--- ОТКРЫТЫЕ СДЕЛКИ ---\n"
+        for name, pos in positions.items():
+            tp, sl = get_tp_sl(pos)
+            txt += f"\n{name}: {pos['type']} по {pos['price']:.2f} ТП {tp:.2f} СЛ {sl:.2f}"
+    else:
+        txt += "\nОткрытых сделок нет - профи ждет точный вход"
+    return txt
+
+async def start(update, context):
+    global CHAT_ID
+    CHAT_ID = update.effective_chat.id
+    msg = f"БОТ-ПРОФЕССИОНАЛ НА ВСЕ 4 РЫНКА АКТИВЕН!\n\nСлежу за:\n1. ЗОЛОТО\n2. БИТКОИН\n3. ЭФИРИУМ\n4. НЕФТЬ\n\nТолько точные входы!\nЛот: {LOT}\n\n/balance - деньги + плюсы/минусы\n/status - все позиции\n/price - цены всех 4 рынков"
+    await update.message.reply_text(msg)
+
+async def balance_cmd(update, context):
+    await update.message.reply_text(balance_text())
+
+async def status_cmd(update, context):
+    await update.message.reply_text(balance_text())
+
+async def price_cmd(update, context):
+    txt = "ЦЕНЫ ВСЕХ 4 РЫНКОВ:\n\n"
+    for name, sym in SYMBOLS.items():
+        closes = get_history(sym)
+        if not closes:
+            txt += f"{name}: нет данных\n"
+            continue
+        price = closes[-1]
+        rsi = calc_rsi(closes)
+        ema200 = calc_ema(closes, 100)
+        trend = "ВВЕРХ" if price > ema200 else "ВНИЗ"
+        txt += f"{name}: {price:.2f} | RSI {rsi:.1f} | Тренд {trend}\n"
+    txt += f"\n{balance_text()}"
+    await update.message.reply_text(txt)
+
+async def check_gold_logic(bot):
+    global BALANCE
+    for name, sym in SYMBOLS.items():
+        try:
+            closes = get_history(sym)
+            if len(closes) < 50:
+                continue
+            price = closes[-1]
+            rsi = calc_rsi(closes)
+            ema50 = calc_ema(closes, 50)
+            ema200 = calc_ema(closes, 100)
+            macd, signal = calc_macd(closes)
+            last_change = (closes[-1] - closes[-4]) / closes[-4] * 100
+            if abs(last_change) > 0.8:
+                print(f"{name} ПРОФИ ЖДЕТ - паника {last_change:.2f}%", flush=True)
+                continue
+            print(f"{name} Цена {price} RSI {rsi:.1f} MACD {macd:.2f}", flush=True)
+            pos = positions.get(name)
+            if pos:
+                entry = pos["price"]
+                amount = pos["amount"]
+                if pos["type"] == "BUY":
+                    pnl_pct = (price - entry) / entry * 100
+                else:
+                    pnl_pct = (entry - price) / entry * 100
+                if pnl_pct >= 2.0:
+                    profit = amount * pnl_pct / 100
+                    BALANCE += profit
+                    if CHAT_ID != 0:
+                        await bot.send_message(chat_id=CHAT_ID, text=f"ПРОФИ ЗАКРЫЛ В ПЛЮС! {name} {pos['type']}\nВход: {entry:.2f}\nВыход: {price:.2f}\nПрибыль: +{profit:.2f}$\n\n{balance_text()}")
+                    del positions[name]
+                    continue
+                if pnl_pct <= -1.5:
+                    loss = amount * pnl_pct / 100
+                    BALANCE += loss
+                    if CHAT_ID != 0:
+                        await bot.send_message(chat_id=CHAT_ID, text=f"ПРОФИ ЗАКРЫЛ ПО СТОПУ {name} {pos['type']}\nВход: {entry:.2f}\nВыход: {price:.2f}\nУбыток: {loss:.2f}$ - стоп защитил депозит!\n\n{balance_text()}")
+                    del positions[name]
+                    continue
+                continue
+            amount = LOT * price
+            if name in ["БИТКОИН", "ЭФИРИУМ"]:
+                amount = 500.0
+            if price > ema200 and rsi < 35 and macd > signal and price > ema50:
+                positions[name] = {"type": "BUY", "price": price, "amount": amount, "lot": LOT}
+                tp, sl = get_tp_sl(positions[name])
+                if CHAT_ID != 0:
+                    await bot.send_message(chat_id=CHAT_ID, text=f"ПРОФИ СИГНАЛ ПОКУПКА! {name}\n\nТренд ВВЕРХ\nRSI: {rsi:.1f} - дешево!\nMACD подтверждает разворот\n\nЦена: {price:.2f}\nЛот: {LOT}\nТП: {tp:.2f}\nСЛ: {sl:.2f}\n\n{balance_text()}")
+                continue
+            if price < ema200 and rsi > 65 and macd < signal and price < ema50:
+                positions[name] = {"type": "SELL", "price": price, "amount": amount, "lot": LOT}
+                tp, sl = get_tp_sl(positions[name])
+                if CHAT_ID != 0:
+                    await bot.send_message(chat_id=CHAT_ID, text=f"ПРОФИ СИГНАЛ ПРОДАЖА! {name}\n\nТренд ВНИЗ\nRSI: {rsi:.1f} - дорого!\nMACD подтверждает разворот\n\nЦена: {price:.2f}\nЛот: {LOT}\nТП: {tp:.2f}\nСЛ: {sl:.2f}\n\n{balance_text()}")
+                continue
+        except Exception as e:
+            print(f"Ошибка {name}: {e}", flush=True)
+
+async def check_gold_job(context):
+    await check_gold_logic(context.bot)
+
+def run_bot():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    while True:
+        try:
+            print("Запускаем Бота на 4 рынка...", flush=True)
+            app = ApplicationBuilder().token(TOKEN).build()
+            app.add_handler(CommandHandler("start", start))
+            app.add_handler(CommandHandler("price", price_cmd))
+            app.add_handler(CommandHandler("status", status_cmd))
+            app.add_handler(CommandHandler("balance", balance_cmd))
+            if app.job_queue:
+                app.job_queue.run_repeating(check_gold_job, interval=900, first=10)
+            print("Бот на 4 рынка запущен!", flush=True)
+            app.run_polling(drop_pending_updates=True, stop_signals=None)
+        except Exception as e:
+            print(f"Бот упал, перезапуск: {e}", flush=True)
+            traceback.print_exc()
+            time.sleep(10)
+
+def main():
+    if TOKEN:
+        t = threading.Thread(target=run_bot, daemon=True)
+        t.start()
+        print("Поток бота запущен", flush=True)
+    else:
+        print("ОШИБКА: Нет TELEGRAM_TOKEN!", flush=True)
+    print(f"Веб сервер на порту {PORT}...", flush=True)
+    server = HTTPServer(("0.0.0.0", PORT), Handler)
+    print("Веб сервер ОК!", flush=True)
+    server.serve_forever()
+
+if __name__ == "__main__":
+    main()
