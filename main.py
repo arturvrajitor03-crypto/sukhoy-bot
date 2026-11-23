@@ -1,6 +1,8 @@
 import os
 import logging
 import requests
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
@@ -8,9 +10,29 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = int(os.getenv("CHAT_ID", "0"))
+PORT = int(os.getenv("PORT", "10000"))
 
 last_signal = ""
 
+# --- FAKE WEB SERVER DLYA RENDER ---
+# Render trebuet otkrytyy port, inache pishet "No open ports"
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is alive!")
+    def log_message(self, *args):
+        pass
+
+def run_web_server():
+    try:
+        server = HTTPServer(("0.0.0.0", PORT), Handler)
+        print(f"Web server started on port {PORT}", flush=True)
+        server.serve_forever()
+    except Exception as e:
+        print(f"Web server error: {e}", flush=True)
+
+# --- ZOLOTO ---
 def get_gold_price():
     r = requests.get("https://data-asg.goldprice.org/dbXRates/USD", timeout=15)
     data = r.json()
@@ -20,7 +42,7 @@ def get_gold_price():
 def make_signal(price):
     global last_signal
     if price >= 2700:
-        signal = "PRODAZHA - Cena ochen vysoko"
+        signal = "PRODAZHA - Cena ochen vysoko, zhdem otkat"
     elif price >= 2650:
         signal = "OSTOROZHNO - Cena vysoko, ne pokupaem"
     elif price <= 2600:
@@ -66,15 +88,6 @@ def main():
     if not TOKEN:
         print("OSHIBKA: Net TELEGRAM_TOKEN!", flush=True)
         return
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("price", price_cmd))
-    app.add_handler(CommandHandler("status", status_cmd))
-    if app.job_queue:
-        app.job_queue.run_repeating(check_gold, interval=900, first=10)
-        print("Budilnik vklyuchen!", flush=True)
-    print("Bot zapushchen!", flush=True)
-    app.run_polling()
 
-if __name__ == "__main__":
-    main()
+    # Zapuskaem fake web server v fone, chtoby Render ne rugalsya na porty
+    threading.Thread(target=run_web
