@@ -13,7 +13,6 @@ logging.basicConfig(level=logging.INFO)
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = int(os.getenv("CHAT_ID", "0") or "0")
 PORT = int(os.getenv("PORT", "10000"))
-
 BALANCE = 500.0
 START_BALANCE = 500.0
 LOT = 1.00
@@ -110,12 +109,7 @@ def balance_text():
 async def start(update, context):
     global CHAT_ID
     CHAT_ID = update.effective_chat.id
-    await update.message.reply_text(f"Bot PRO AKTIVNIY rabotaet!\n\nBUY + SELL\nLot: {LOT}\nVirtual: 500$\n\n/balance - deneg\n/status - pozicii + TP/SL\n/price - cena")
+    msg = f"Bot PRO AKTIVNIY rabotaet!\n\nBUY + SELL\nLot: {LOT}\nVirtual: 500$\n\n/balance - deneg\n/status - pozicii + TP/SL\n/price - cena"
+    await update.message.reply_text(msg)
 
-async def balance_cmd(update, context):
-    await update.message.reply_text(balance_text())
-
-async def status_cmd(update, context):
-    await update.message.reply_text(balance_text())
-
-async def price_cmd
+async
