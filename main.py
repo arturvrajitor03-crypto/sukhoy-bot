@@ -43,29 +43,30 @@ def get_history():
     return []
 
 def calc_rsi(closes, period=14):
-    if len(closes) < period+1:
+    if len(closes) < period + 1:
         return 50
-    gains, losses = [], []
+    gains = []
+    losses = []
     for i in range(1, len(closes)):
-        d = closes[i]-closes[i-1]
+        d = closes[i] - closes[i-1]
         gains.append(max(d, 0))
         losses.append(max(-d, 0))
-    ag = sum(gains[-period:])/period
-    al = sum(losses[-period:])/period
+    ag = sum(gains[-period:]) / period
+    al = sum(losses[-period:]) / period
     if al == 0:
         return 100
-    rs = ag/al
-    return 100 - (100/(1+rs))
+    rs = ag / al
+    return 100 - (100 / (1 + rs))
 
 def calc_ema(closes, period, current_price=None):
     if not closes:
         return current_price if current_price else 0
     if len(closes) < period:
         return closes[-1]
-    k = 2/(period+1)
+    k = 2 / (period + 1)
     ema = closes[0]
     for p in closes[1:]:
-        ema = p*k + ema*(1-k)
+        ema = p * k + ema * (1 - k)
     return ema
 
 def get_gold_price():
@@ -79,14 +80,15 @@ def get_gold_price():
     try:
         r = requests.get("https://api.gold-api.com/price/XAU", timeout=10, headers=headers)
         d = r.json()
-        return float(d["price"]), float(d.get("change24h", 0))
+        ch = d.get("change24h", 0)
+        return float(d["price"]), float(ch)
     except Exception:
         pass
     raise Exception("API ne otvechayut")
 
 def get_tp_sl(pos):
-    entry = pos['price']
-    if pos['type'] == 'BUY':
+    entry = pos["price"]
+    if pos["type"] == "BUY":
         tp = entry * 1.02
         sl = entry * 0.985
     else:
@@ -122,7 +124,8 @@ async def price_cmd(update, context):
         closes = get_history()
         rsi = calc_rsi(closes)
         ema = calc_ema(closes, 50, price)
-        txt = f"ZOLOTO: {price:.2f}\nIzm: {chg:+.2f}\n\nRSI: {rsi:.1f}\nEMA50: {ema:.2f}\nTrend: {'VVERH' if price > ema else 'VNIZ'}\n\n{balance_text()}"
+        trend = "VVERH" if price > ema else "VNIZ"
+        txt = f"ZOLOTO: {price:.2f}\nIzm: {chg:+.2f}\n\nRSI: {rsi:.1f}\nEMA50: {ema:.2f}\nTrend: {trend}\n\n{balance_text()}"
         await update.message.reply_text(txt)
     except Exception as e:
         await update.message.reply_text(f"Oshibka: {e}")
@@ -137,9 +140,9 @@ async def check_gold_logic(bot):
         print(f"Check Price {price} RSI {rsi:.1f} EMA {ema:.2f} Bal {BALANCE} Pos {position}", flush=True)
 
         if position:
-            entry = position['price']
-            amount = position['amount']
-            if position['type'] == 'BUY':
+            entry = position["price"]
+            amount = position["amount"]
+            if position["type"] == "BUY":
                 pnl_pct = (price - entry) / entry * 100
             else:
                 pnl_pct = (entry - price) / entry * 100
@@ -149,7 +152,79 @@ async def check_gold_logic(bot):
                 profit = amount * pnl_pct / 100
                 BALANCE += profit
                 if CHAT_ID != 0:
-                    await bot.send_message(chat_id=CHAT_ID, text=f"✅ ZAKRYLI V PLYUS! {position['type']} Lot {position['lot']}\nVhod: {entry:.2f}\nVihod: {price:.2f}\nTP bil: {tp:.2f}\nPribil: +{profit:.2f}$\n\n{balance_text()}")
+                    await bot.send_message(chat_id=CHAT_ID, text=f"ZAKRYLI V PLYUS! {position['type']} Lot {position['lot']}\nVhod: {entry:.2f}\nVihod: {price:.2f}\nTP bil: {tp:.2f}\nPribil: +{profit:.2f}$\n\n{balance_text()}")
                 position = None
                 return
-            if pnl_pct <=
+
+            is_stop = pnl_pct <= -1.5
+            if is_stop:
+                loss = amount * pnl_pct / 100
+                BALANCE += loss
+                if CHAT_ID != 0:
+                    await bot.send_message(chat_id=CHAT_ID, text=f"STOP-LOSS {position['type']} Lot {position['lot']}\nVhod: {entry:.2f}\nVihod: {price:.2f}\nSL bil: {sl:.2f}\nUbitok: {loss:.2f}$\n\n{balance_text()}")
+                position = None
+                return
+            return
+
+        amount = LOT * price
+        if rsi < 40 and price > ema:
+            position = {"type": "BUY", "price": price, "amount": amount, "lot": LOT}
+            tp, sl = get_tp_sl(position)
+            if CHAT_ID != 0:
+                await bot.send_message(chat_id=CHAT_ID, text=f"SIGNAL BUY!\nCena: {price:.2f}\nRSI: {rsi:.1f}\nEMA50: {ema:.2f}\nLot: {LOT}\nSumma: {amount:.2f}$\nTP: {tp:.2f}\nSL: {sl:.2f}\n\n{balance_text()}")
+            return
+
+        if rsi > 60 and price < ema:
+            position = {"type": "SELL", "price": price, "amount": amount, "lot": LOT}
+            tp, sl = get_tp_sl(position)
+            if CHAT_ID != 0:
+                await bot.send_message(chat_id=CHAT_ID, text=f"SIGNAL SELL!\nCena: {price:.2f}\nRSI: {rsi:.1f}\nEMA50: {ema:.2f}\nLot: {LOT}\nSumma: {amount:.2f}$\nTP: {tp:.2f}\nSL: {sl:.2f}\n\n{balance_text()}")
+            return
+
+        if rsi > 75:
+            position = {"type": "SELL", "price": price, "amount": amount, "lot": LOT}
+            tp, sl = get_tp_sl(position)
+            if CHAT_ID != 0:
+                await bot.send_message(chat_id=CHAT_ID, text=f"SIGNAL SELL! PEREKUPLEN!\nCena: {price:.2f}\nRSI: {rsi:.1f}\nLot: {LOT}\nSumma: {amount:.2f}$\nTP: {tp:.2f}\nSL: {sl:.2f}\n\n{balance_text()}")
+            return
+
+    except Exception as e:
+        print(f"Check oshibka: {e}", flush=True)
+
+async def check_gold_job(context):
+    await check_gold_logic(context.bot)
+
+def run_bot():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    while True:
+        try:
+            print("Zapuskaem Telegram bot...", flush=True)
+            app = ApplicationBuilder().token(TOKEN).build()
+            app.add_handler(CommandHandler("start", start))
+            app.add_handler(CommandHandler("price", price_cmd))
+            app.add_handler(CommandHandler("status", status_cmd))
+            app.add_handler(CommandHandler("balance", balance_cmd))
+            if app.job_queue:
+                app.job_queue.run_repeating(check_gold_job, interval=900, first=10)
+            print("Bot PRO zapushchen!", flush=True)
+            app.run_polling(drop_pending_updates=True, stop_signals=None)
+        except Exception as e:
+            print(f"Bot upal, perezapusk: {e}", flush=True)
+            traceback.print_exc()
+            time.sleep(10)
+
+def main():
+    if TOKEN:
+        t = threading.Thread(target=run_bot, daemon=True)
+        t.start()
+        print("Bot thread zapushchen", flush=True)
+    else:
+        print("OSHIBKA: Net TELEGRAM_TOKEN!", flush=True)
+    print(f"Web server na portu {PORT}...", flush=True)
+    server = HTTPServer(("0.0.0.0", PORT), Handler)
+    print("Web server OK!", flush=True)
+    server.serve_forever()
+
+if __name__ == "__main__":
+    main()
