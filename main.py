@@ -16,7 +16,7 @@ PORT = int(os.getenv("PORT", "10000"))
 
 BALANCE = 500.0
 START_BALANCE = 500.0
-TRADE_AMOUNT = 50.0
+LOT = 0.20
 position = None
 
 class Handler(BaseHTTPRequestHandler):
@@ -84,12 +84,23 @@ def get_gold_price():
         pass
     raise Exception("API ne otvechayut")
 
+def get_tp_sl(pos):
+    entry = pos['price']
+    if pos['type'] == 'BUY':
+        tp = entry * 1.02
+        sl = entry * 0.985
+    else:
+        tp = entry * 0.98
+        sl = entry * 1.015
+    return tp, sl
+
 def balance_text():
     profit = BALANCE - START_BALANCE
     znak = "+" if profit >= 0 else ""
-    txt = f"VIRTUALNIY SCHET\n\nStart: {START_BALANCE:.2f}$\nSeychas: {BALANCE:.2f}$\nPribil: {znak}{profit:.2f}$\n"
+    txt = f"VIRTUALNIY SCHET\n\nStart: {START_BALANCE:.2f}$\nSeychas: {BALANCE:.2f}$\nPribil: {znak}{profit:.2f}$\nLot: {LOT}\n"
     if position:
-        txt += f"\nOtkrita: {position['type']} {position['amount']}$ po {position['price']:.2f}"
+        tp, sl = get_tp_sl(position)
+        txt += f"\nOtkrita: {position['type']} Lot {position['lot']} po {position['price']:.2f}\nSumma: {position['amount']:.2f}$\nTP: {tp:.2f}\nSL: {sl:.2f}"
     else:
         txt += "\nOtkritih sdelok net"
     return txt
@@ -97,7 +108,7 @@ def balance_text():
 async def start(update, context):
     global CHAT_ID
     CHAT_ID = update.effective_chat.id
-    await update.message.reply_text(f"Bot PRO AKTIVNIY rabotaet!\n\nBUY + SELL - v obe storoni!\nVirtual: 500$\n\n/balance - deneg\n/status - pozicii\n/price - cena")
+    await update.message.reply_text(f"Bot PRO AKTIVNIY rabotaet!\n\nBUY + SELL\nLot: {LOT}\nVirtual: 500$\n\n/balance - deneg\n/status - pozicii + TP/SL\n/price - cena")
 
 async def balance_cmd(update, context):
     await update.message.reply_text(balance_text())
@@ -125,89 +136,20 @@ async def check_gold_logic(bot):
         ema = calc_ema(closes, 50, price)
         print(f"Check Price {price} RSI {rsi:.1f} EMA {ema:.2f} Bal {BALANCE} Pos {position}", flush=True)
 
-        # --- ESLI EST OTKRYTA SDELKA - PROVERYAEM ZAKRYTIE ---
         if position:
             entry = position['price']
+            amount = position['amount']
             if position['type'] == 'BUY':
                 pnl_pct = (price - entry) / entry * 100
-            else:  # SELL
+            else:
                 pnl_pct = (entry - price) / entry * 100
+            tp, sl = get_tp_sl(position)
 
             if pnl_pct >= 2.0:
-                profit = TRADE_AMOUNT * pnl_pct / 100
+                profit = amount * pnl_pct / 100
                 BALANCE += profit
                 if CHAT_ID != 0:
-                    await bot.send_message(chat_id=CHAT_ID, text=f"✅ ZAKRYLI V PLYUS! {position['type']}\nVhod: {entry:.2f}\nVihod: {price:.2f}\nPribil: +{profit:.2f}$\n\n{balance_text()}")
+                    await bot.send_message(chat_id=CHAT_ID, text=f"✅ ZAKRYLI V PLYUS! {position['type']} Lot {position['lot']}\nVhod: {entry:.2f}\nVihod: {price:.2f}\nTP bil: {tp:.2f}\nPribil: +{profit:.2f}$\n\n{balance_text()}")
                 position = None
                 return
-            if pnl_pct <= -1.5:
-                loss = TRADE_AMOUNT * pnl_pct / 100
-                BALANCE += loss
-                if CHAT_ID != 0:
-                    await bot.send_message(chat_id=CHAT_ID, text=f"🛑 STOP-LOSS {position['type']}\nVhod: {entry:.2f}\nVihod: {price:.2f}\nUbitok: {loss:.2f}$\n\n{balance_text()}")
-                position = None
-                return
-            return
-
-        # --- NET SDELKI - ISHEM NOVUYU, V OBE STORONI ---
-        # 1. BUY - deshevo + trend vverh
-        if rsi < 40 and price > ema:
-            position = {'type': 'BUY', 'price': price, 'amount': TRADE_AMOUNT}
-            if CHAT_ID != 0:
-                await bot.send_message(chat_id=CHAT_ID, text=f"🟢 SIGNAL BUY!\nCena: {price:.2f}\nRSI: {rsi:.1f} - deshevo!\nEMA50: {ema:.2f} - trend vverh\nSumma: {TRADE_AMOUNT}$\n\n{balance_text()}")
-            return
-
-        # 2. SELL - dorogo + trend vniz
-        if rsi > 60 and price < ema:
-            position = {'type': 'SELL', 'price': price, 'amount': TRADE_AMOUNT}
-            if CHAT_ID != 0:
-                await bot.send_message(chat_id=CHAT_ID, text=f"🔴 SIGNAL SELL!\nCena: {price:.2f}\nRSI: {rsi:.1f} - dorogo!\nEMA50: {ema:.2f} - trend vniz\nSumma: {TRADE_AMOUNT}$\n\n{balance_text()}")
-            return
-
-        # 3. SELL esli ochen perekuplen, dazhe bez trenda - chtob bil aktivnim
-        if rsi > 75:
-            position = {'type': 'SELL', 'price': price, 'amount': TRADE_AMOUNT}
-            if CHAT_ID != 0:
-                await bot.send_message(chat_id=CHAT_ID, text=f"🔴 SIGNAL SELL! PEREKUPLEN!\nCena: {price:.2f}\nRSI: {rsi:.1f} - ochen dorogo!\nSumma: {TRADE_AMOUNT}$\n\n{balance_text()}")
-            return
-
-    except Exception as e:
-        print(f"Check oshibka: {e}", flush=True)
-
-async def check_gold_job(context):
-    await check_gold_logic(context.bot)
-
-def run_bot():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    while True:
-        try:
-            print("Zapuskaem Telegram bot...", flush=True)
-            app = ApplicationBuilder().token(TOKEN).build()
-            app.add_handler(CommandHandler("start", start))
-            app.add_handler(CommandHandler("price", price_cmd))
-            app.add_handler(CommandHandler("status", status_cmd))
-            app.add_handler(CommandHandler("balance", balance_cmd))
-            if app.job_queue:
-                app.job_queue.run_repeating(check_gold_job, interval=900, first=10)
-            print("Bot PRO zapushchen!", flush=True)
-            app.run_polling(drop_pending_updates=True, stop_signals=None)
-        except Exception as e:
-            print(f"Bot upal, perezapusk: {e}", flush=True)
-            traceback.print_exc()
-            time.sleep(10)
-
-def main():
-    if TOKEN:
-        t = threading.Thread(target=run_bot, daemon=True)
-        t.start()
-        print("Bot thread zapushchen", flush=True)
-    else:
-        print("OSHIBKA: Net TELEGRAM_TOKEN!", flush=True)
-    print(f"Web server na portu {PORT}...", flush=True)
-    server = HTTPServer(("0.0.0.0", PORT), Handler)
-    print("Web server OK!", flush=True)
-    server.serve_forever()
-
-if __name__ == "__main__":
-    main()
+            if pnl_pct <=
