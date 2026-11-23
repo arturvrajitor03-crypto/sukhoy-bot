@@ -4,13 +4,13 @@ import requests
 import threading
 import time
 import traceback
+import asyncio
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 logging.basicConfig(level=logging.INFO)
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-print(f"TOKEN est? {'DA' if TOKEN else 'NET!'}", flush=True)
 CHAT_ID = int(os.getenv("CHAT_ID", "0") or "0")
 PORT = int(os.getenv("PORT", "10000"))
 
@@ -19,12 +19,11 @@ START_BALANCE = 500.0
 TRADE_AMOUNT = 50.0
 position = None
 
-# --- WEB SERVER - GLAVNIY, CHTOBI RENDER NE VIKLUCHAL ---
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Bot is alive! Balance 500$")
+        self.wfile.write(b"Bot is alive!")
     def log_message(self, *args):
         pass
 
@@ -32,7 +31,6 @@ def get_history():
     urls = [
         "https://api.binance.us/api/v3/klines?symbol=PAXGUSDT&interval=15m&limit=100",
         "https://data-api.binance.vision/api/v3/klines?symbol=PAXGUSDT&interval=15m&limit=100",
-        "https://api.binance.com/api/v3/klines?symbol=PAXGUSDT&interval=15m&limit=100",
     ]
     for url in urls:
         try:
@@ -158,6 +156,9 @@ async def check_gold_job(context):
     await check_gold_logic(context.bot)
 
 def run_bot():
+    # VAZHNO: otdelniy event loop dlya potoka
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     while True:
         try:
             print("Zapuskaem Telegram bot...", flush=True)
@@ -169,23 +170,23 @@ def run_bot():
             if app.job_queue:
                 app.job_queue.run_repeating(check_gold_job, interval=900, first=10)
             print("Bot PRO zapushchen!", flush=True)
-            app.run_polling(drop_pending_updates=True)
+            # stop_signals=None - pozvolyaet rabotat v fone!
+            app.run_polling(drop_pending_updates=True, stop_signals=None)
         except Exception as e:
-            print(f"Bot upal, perezapusk cherez 10 sek: {e}", flush=True)
+            print(f"Bot upal, perezapusk: {e}", flush=True)
             traceback.print_exc()
             time.sleep(10)
 
 def main():
-    if not TOKEN:
-        print("OSHIBKA: Net TELEGRAM_TOKEN!", flush=True)
-    else:
+    if TOKEN:
         t = threading.Thread(target=run_bot, daemon=True)
         t.start()
         print("Bot thread zapushchen", flush=True)
-    # GLAVNIY POTOK - WEB SERVER, RENDER VIDIT EGO I NE VIKLUCHAET
+    else:
+        print("OSHIBKA: Net TELEGRAM_TOKEN!", flush=True)
     print(f"Web server na portu {PORT}...", flush=True)
     server = HTTPServer(("0.0.0.0", PORT), Handler)
-    print("Web server OK - Render ne viklyuchit!", flush=True)
+    print("Web server OK!", flush=True)
     server.serve_forever()
 
 if __name__ == "__main__":
