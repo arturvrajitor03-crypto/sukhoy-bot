@@ -10,7 +10,11 @@ logging.basicConfig(level=logging.INFO)
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = int(os.getenv("CHAT_ID", "0"))
 PORT = int(os.getenv("PORT", "10000"))
-last_signal = ""
+
+BALANCE = 500.0
+START_BALANCE = 500.0
+TRADE_AMOUNT = 50.0
+position = None
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -23,95 +27,87 @@ class Handler(BaseHTTPRequestHandler):
 def run_web_server():
     try:
         server = HTTPServer(("0.0.0.0", PORT), Handler)
-        print("Web server started", flush=True)
         server.serve_forever()
     except Exception as e:
         print(f"Web error: {e}", flush=True)
+
+def get_history():
+    # Berem istoriyu PAXG - eto zoloto na Binance, dlya indikatorov
+    try:
+        url = "https://api.binance.com/api/v3/klines?symbol=PAXGUSDT&interval=15m&limit=100"
+        r = requests.get(url, timeout=10).json()
+        closes = [float(x[4]) for x in r]
+        return closes
+    except Exception as e:
+        print(f"History fail: {e}", flush=True)
+        return []
+
+def calc_rsi(closes, period=14):
+    if len(closes) < period+1:
+        return 50
+    gains, losses = [], []
+    for i in range(1, len(closes)):
+        d = closes[i]-closes[i-1]
+        gains.append(max(d, 0))
+        losses.append(max(-d, 0))
+    ag = sum(gains[-period:])/period
+    al = sum(losses[-period:])/period
+    if al == 0:
+        return 100
+    rs = ag/al
+    return 100 - (100/(1+rs))
+
+def calc_ema(closes, period):
+    if len(closes) < period:
+        return closes[-1] if closes else 0
+    k = 2/(period+1)
+    ema = closes[0]
+    for p in closes[1:]:
+        ema = p*k + ema*(1-k)
+    return ema
+
+def calc_macd(closes):
+    if len(closes) < 26:
+        return 0, 0
+    ema12 = calc_ema(closes[-30:], 12)
+    ema26 = calc_ema(closes[-30:], 26)
+    macd = ema12 - ema26
+    # signal - EMA9 ot MACD priblizitelno
+    return macd, macd
 
 def get_gold_price():
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
         r = requests.get("https://data-asg.goldprice.org/dbXRates/USD", timeout=10, headers=headers)
-        data = r.json()
-        item = data["items"][0]
+        item = r.json()["items"][0]
         return float(item["curr"]), float(item["chg"])
-    except Exception as e:
-        print(f"API 1 fail: {e}", flush=True)
+    except Exception:
+        pass
     try:
         r = requests.get("https://api.gold-api.com/price/XAU", timeout=10, headers=headers)
-        data = r.json()
-        price = float(data["price"])
-        chg = float(data.get("change24h", 0))
-        return price, chg
-    except Exception as e:
-        print(f"API 2 fail: {e}", flush=True)
-    try:
-        r = requests.get("https://api.metals.live/v1/spot", timeout=10, headers=headers)
-        data = r.json()
-        price = float(data["gold"])
-        return price, 0.0
-    except Exception as e:
-        print(f"API 3 fail: {e}", flush=True)
-    raise Exception("Vse API ne otvechayut")
+        d = r.json()
+        return float(d["price"]), float(d.get("change24h", 0))
+    except Exception:
+        pass
+    raise Exception("API ne otvechayut")
 
-def make_signal(price):
-    global last_signal
-    if price >= 3750:
-        signal = "PRODAZHA - Cena ochen vysoko, zhdem otkat"
-    elif price >= 3680:
-        signal = "OSTOROZHNO - Cena vysoko, ne pokupaem"
-    elif price <= 3580:
-        signal = "POKUPKA - Cena nizko, horoshiy vhod"
-    elif price <= 3520:
-        signal = "SILNAYA POKUPKA - Cena ochen nizko"
+def balance_text():
+    profit = BALANCE - START_BALANCE
+    znak = "+" if profit >= 0 else ""
+    txt = f"VIRTUALNIY SCHET\n\nStart: {START_BALANCE:.2f}$\nSeychas: {BALANCE:.2f}$\nPribil: {znak}{profit:.2f}$\n"
+    if position:
+        txt += f"\nOtkrita: POKUPKA {position['amount']}$ po {position['price']:.2f}"
     else:
-        signal = "ZHDEM - Cena v seredine, bez sdelki"
-    if signal == last_signal:
-        return None
-    last_signal = signal
-    return signal
+        txt += "\nOtkritih sdelok net"
+    return txt
 
 async def start(update, context):
-    await update.message.reply_text("Bot zapushchen! Signaly po zolotu kazhdye 15 minut.\n\n/start - zapustit\n/price - cena\n/status - proverit")
+    global CHAT_ID
+    CHAT_ID = update.effective_chat.id
+    await update.message.reply_text(f"Bot PRO zapushchen!\n\nIndikatori: RSI + EMA50 + MACD\nVirtual: 500$\nSdelka: 50$\n\n/balance - deneg\n/status - pozicii\n/price - cena + indikatori")
 
-async def price_cmd(update, context):
-    try:
-        price, chg = get_gold_price()
-        sig = make_signal(price) or "Bez izmeneniy"
-        txt = f"ZOLOTO SEYCHAS\nCena: {price:.2f}\nIzm: {chg:+.2f}\n\n{sig}"
-        await update.message.reply_text(txt)
-    except Exception as e:
-        await update.message.reply_text(f"Oshibka: {e}")
+async def balance_cmd(update, context):
+    await update.message.reply_text(balance_text())
 
 async def status_cmd(update, context):
-    await update.message.reply_text("Ya zhivoy! Proveryayu zoloto kazhdye 15 minut.")
-
-async def check_gold(context):
-    try:
-        price, chg = get_gold_price()
-        print(f"Price {price}", flush=True)
-        signal = make_signal(price)
-        if signal and CHAT_ID != 0:
-            txt = f"SIGNAL PO ZOLOTU\n\nCena: {price:.2f}\nIzm: {chg:+.2f}\n\n{signal}"
-            await context.bot.send_message(chat_id=CHAT_ID, text=txt)
-    except Exception as e:
-        print(f"Oshibka: {e}", flush=True)
-
-def main():
-    if not TOKEN:
-        print("Net TOKEN!", flush=True)
-        return
-    t = threading.Thread(target=run_web_server)
-    t.daemon = True
-    t.start()
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("price", price_cmd))
-    app.add_handler(CommandHandler("status", status_cmd))
-    if app.job_queue:
-        app.job_queue.run_repeating(check_gold, interval=900, first=10)
-    print("Bot zapushchen!", flush=True)
-    app.run_polling(drop_pending_updates=True)
-
-if __name__ == "__main__":
-    main()
+    await update.message.reply
