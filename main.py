@@ -17,7 +17,7 @@ PORT = int(os.getenv("PORT", "10000"))
 BALANCE = 500.0
 START_BALANCE = 500.0
 LOT = 1.00
-MAX_PER_SYMBOL = 2
+MAX_PER_SYMBOL = 1  # ИСПРАВЛЕНО: было 2, стало 1 - не будет 2 одинаковых сделок
 
 SYMBOLS = {
     "ЗОЛОТО": "PAXGUSDT",
@@ -26,6 +26,7 @@ SYMBOLS = {
     "НЕФТЬ": "CL=F",
 }
 positions = {}
+last_close_time = {}  # ИСПРАВЛЕНО: пауза после стопа
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -47,8 +48,8 @@ def get_history(symbol):
         except Exception:
             return []
     urls = [
-        f"https://api.binance.us/api/v3/klines?symbol={symbol}&interval=5m&limit=100",
-        f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval=5m&limit=100",
+        f"https://api.binance.us/api/v3/klines?symbol={symbol}&interval=5m&limit=200",
+        f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval=5m&limit=200",
     ]
     for url in urls:
         try:
@@ -60,6 +61,7 @@ def get_history(symbol):
             continue
     return []
 
+# ИСПРАВЛЕНО: Правильный RSI, не даёт 100 когда не надо
 def calc_rsi(closes, period=14):
     if len(closes) < period + 1:
         return 50
@@ -69,10 +71,14 @@ def calc_rsi(closes, period=14):
         d = closes[i] - closes[i-1]
         gains.append(max(d, 0))
         losses.append(max(-d, 0))
-    ag = sum(gains[-period:]) / period
-    al = sum(losses[-period:]) / period
+    # Wilder - сглаживание, а не просто среднее
+    ag = sum(gains[:period]) / period
+    al = sum(losses[:period]) / period
+    for i in range(period, len(gains)):
+        ag = (ag * (period-1) + gains[i]) / period
+        al = (al * (period-1) + losses[i]) / period
     if al == 0:
-        return 100
+        return 95  # было 100, стало 95 - чтобы не продавать в сильный рост
     rs = ag / al
     return 100 - (100 / (1 + rs))
 
@@ -82,21 +88,18 @@ def calc_ema(closes, period):
     if len(closes) < period:
         return closes[-1]
     k = 2 / (period + 1)
-    ema = closes[0]
-    for p in closes[1:]:
+    ema = sum(closes[:period]) / period  # ИСПРАВЛЕНО: старт от среднего, а не от первой цены
+    for p in closes[period:]:
         ema = p * k + ema * (1 - k)
     return ema
 
-# СНАЙПЕР - BOLLINGER ДЛЯ ТОЧНОСТИ
 def calc_bollinger(closes, period=20):
     if len(closes) < period:
         return closes[-1], closes[-1]
     last20 = closes[-period:]
     mid = sum(last20) / period
     std = statistics.pstdev(last20)
-    upper = mid + 2 * std
-    lower = mid - 2 * std
-    return upper, lower
+    return mid + 2 * std, mid - 2 * std
 
 def get_tp_sl(pos):
     entry = pos["price"]
@@ -115,7 +118,7 @@ def count_for(name):
 def balance_text():
     profit = BALANCE - START_BALANCE
     znak = "+" if profit >= 0 else ""
-    txt = f"🎯 СНАЙПЕР СЧЁТ - 8 СДЕЛОК MAX\n\nСтарт: {START_BALANCE:.2f}$\nСейчас: {BALANCE:.2f}$\nПрибыль: {znak}{profit:.2f}$\n"
+    txt = f"🎯 СНАЙПЕР СЧЁТ - 4 СДЕЛКИ MAX\n\nСтарт: {START_BALANCE:.2f}$\nСейчас: {BALANCE:.2f}$\nПрибыль: {znak}{profit:.2f}$\n"
     if positions:
         txt += "\n--- ОТКРЫТЫЕ ---\n"
         for name, pos in positions.items():
@@ -145,7 +148,7 @@ async def price_cmd(update, context):
             continue
         price = closes[-1]
         rsi = calc_rsi(closes)
-        txt += f"{name}: {price:.2f} | RSI {rsi:.1f} | Сделок: {count_for(name)}/2\n"
+        txt += f"{name}: {price:.2f} | RSI {rsi:.1f} | Сделок: {count_for(name)}/1\n"
     txt += f"\n{balance_text()}"
     await update.message.reply_text(txt)
 
@@ -158,13 +161,15 @@ async def check_gold_logic(bot):
     for name, sym in SYMBOLS.items():
         try:
             closes = get_history(sym)
-            if len(closes) < 30:
+            if len(closes) < 50:
                 continue
             price = closes[-1]
             rsi = calc_rsi(closes)
-            ema200 = calc_ema(closes, 50)
+            ema200 = calc_ema(closes, 200)  # ИСПРАВЛЕНО: было 50, стало 200 настоящий
             upper, lower = calc_bollinger(closes)
-            print(f"{name} Цена {price} RSI {rsi:.1f} Boll {lower:.2f}-{upper:.2f} Сделок {count_for(name)}", flush=True)
+            print(f"{name} Цена {price} RSI {rsi:.1f} EMA200 {ema200:.2f} Boll {lower:.2f}-{upper:.2f}", flush=True)
+
+            # Закрытие сделок
             keys = [k for k in list(positions.keys()) if k.startswith(name)]
             for key in keys:
                 pos = positions.get(key)
@@ -179,6 +184,7 @@ async def check_gold_logic(bot):
                 if pnl_pct >= 1.0:
                     profit = amount * pnl_pct / 100
                     BALANCE += profit
+                    last_close_time[name] = time.time()
                     if CHAT_ID != 0:
                         await bot.send_message(chat_id=CHAT_ID, text=f"ПЛЮС! {key} {pos['type']}\nВход {entry:.2f} Выход {price:.2f}\nПрибыль +{profit:.2f}$\n\n{balance_text()}")
                     del positions[key]
@@ -186,18 +192,26 @@ async def check_gold_logic(bot):
                 if pnl_pct <= -0.5:
                     loss = amount * pnl_pct / 100
                     BALANCE += loss
+                    last_close_time[name] = time.time()  # ПАУЗА 30 мин после стопа
                     if CHAT_ID != 0:
                         await bot.send_message(chat_id=CHAT_ID, text=f"СТОП {key} {pos['type']}\nВход {entry:.2f} Выход {price:.2f}\nУбыток {loss:.2f}$\n\n{balance_text()}")
                     del positions[key]
                     continue
+
             if count_for(name) >= MAX_PER_SYMBOL:
                 continue
+
+            # ИСПРАВЛЕНО: ПАУЗА 30 МИНУТ - не открывает сразу после стопа
+            if name in last_close_time and time.time() - last_close_time[name] < 1800:
+                print(f"{name} ПАУЗА - ждём 30 мин после прошлой сделки", flush=True)
+                continue
+
             amount = LOT * price
             if name in ["БИТКОИН", "ЭФИРИУМ"]:
                 amount = 500.0
 
-            # СНАЙПЕР - ВЕРИТ ЧТО МОЖНО КУПИТЬ -> ПОКУПАЕТ
-            if rsi < 35 and price <= lower + (upper-lower)*0.1 and price > ema200:
+            # СНАЙПЕР BUY - только если тренд вверх и RSI низкий
+            if rsi < 35 and rsi > 5 and price <= lower + (upper-lower)*0.15 and price > ema200:
                 n = count_for(name) + 1
                 key = f"{name} #{n}"
                 positions[key] = {"type": "BUY", "price": price, "amount": amount, "lot": LOT}
@@ -206,8 +220,9 @@ async def check_gold_logic(bot):
                     await bot.send_message(chat_id=CHAT_ID, text=f"🎯 СНАЙПЕР ПОКУПКА! {key}\nRSI {rsi:.1f} Цена {price:.2f} Boll низ {lower:.2f}\nТП {tp:.2f} СЛ {sl:.2f}\n\n{balance_text()}")
                 continue
 
-            # СНАЙПЕР - ВЕРИТ ЧТО МОЖНО ПРОДАТЬ -> ПРОДАЁТ
-            if rsi > 65 and price >= upper - (upper-lower)*0.1 and price < ema200:
+            # СНАЙПЕР SELL - только если тренд вниз и RSI высокий, НО НЕ 95-100
+            # ИСПРАВЛЕНО: запрет продавать в сильный рост
+            if rsi > 65 and rsi < 90 and price >= upper - (upper-lower)*0.15 and price < ema200:
                 n = count_for(name) + 1
                 key = f"{name} #{n}"
                 positions[key] = {"type": "SELL", "price": price, "amount": amount, "lot": LOT}
