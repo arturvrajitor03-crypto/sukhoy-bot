@@ -25,9 +25,7 @@ SYMBOLS = {
     "ЭФИРИУМ": "ETHUSDT",
     "НЕФТЬ": "CL=F",
 }
-# Для Binance у золота другое имя
 BINANCE_MAP = {"XAUUSDT": "PAXGUSDT", "BTCUSDT": "BTCUSDT", "ETHUSDT": "ETHUSDT"}
-
 positions = {}
 last_close_time = {}
 
@@ -48,43 +46,35 @@ def get_history(symbol):
             closes = r["chart"]["result"][0]["indicators"]["quote"][0]["close"]
             closes = [float(x) for x in closes if x is not None]
             return closes
-        except Exception as e:
-            print(f"Нефть ошибка: {e}")
+        except Exception:
             return []
-    # 1 ПОПЫТКА - Bybit 15м как на твоём графике
     try:
         url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval=15&limit=200"
         r = requests.get(url, timeout=10).json()
         if r.get("result") and r["result"].get("list"):
             closes = [float(x[4]) for x in r["result"]["list"][::-1]]
             if len(closes) > 50:
-                print(f"{symbol} - Bybit OK {len(closes)} свечей")
                 return closes
-    except Exception as e:
-        print(f"Bybit {symbol} ошибка: {e}")
-    # 2 ПОПЫТКА - Binance Vision
+    except Exception:
+        pass
     try:
         bsym = BINANCE_MAP.get(symbol, symbol)
         url = f"https://data-api.binance.vision/api/v3/klines?symbol={bsym}&interval=15m&limit=200"
         r = requests.get(url, timeout=10).json()
         closes = [float(x[4]) for x in r]
         if len(closes) > 50:
-            print(f"{symbol} - Binance Vision OK")
             return closes
-    except Exception as e:
-        print(f"Binance Vision {symbol} ошибка: {e}")
-    # 3 ПОПЫТКА - Binance US
+    except Exception:
+        pass
     try:
         bsym = BINANCE_MAP.get(symbol, symbol)
         url = f"https://api.binance.us/api/v3/klines?symbol={bsym}&interval=15m&limit=200"
         r = requests.get(url, timeout=10).json()
         closes = [float(x[4]) for x in r]
         if len(closes) > 50:
-            print(f"{symbol} - Binance US OK")
             return closes
-    except Exception as e:
-        print(f"Binance US {symbol} ошибка: {e}")
-    print(f"{symbol} - НЕТ ДАННЫХ ниоткуда!")
+    except Exception:
+        pass
     return []
 
 def calc_rsi(closes, period=14):
@@ -155,7 +145,7 @@ def balance_text():
 async def start(update, context):
     global CHAT_ID
     CHAT_ID = update.effective_chat.id
-    await update.message.reply_text(f"🎯 СНАЙПЕР БОТ ВКЛЮЧЕН! Проверка каждую минуту!\nBUY внизу, SELL вверху!\n\n{balance_text()}\n\n/balance - деньги\n/status - позиции\n/price - цены")
+    await update.message.reply_text(f"🎯 СНАЙПЕР БОТ ВКЛЮЧЕН!\nВВЕРХ = BUY, ВНИЗ = SELL\n\n{balance_text()}\n\n/balance - деньги\n/status - позиции\n/price - цены")
 
 async def balance_cmd(update, context):
     await update.message.reply_text(balance_text())
@@ -172,8 +162,9 @@ async def price_cmd(update, context):
             continue
         price = closes[-1]
         rsi = calc_rsi(closes)
-        upper, lower = calc_bollinger(closes)
-        txt += f"{name}: {price:.2f} | RSI {rsi:.1f} | Boll {lower:.2f}-{upper:.2f} | Сделок: {count_for(name)}/1\n"
+        ema50 = calc_ema(closes, 50)
+        trend = "ВВЕРХ ⬆️" if price > ema50 else "ВНИЗ ⬇️"
+        txt += f"{name}: {price:.2f} | RSI {rsi:.1f} | {trend} | Сделок: {count_for(name)}/1\n"
     txt += f"\n{balance_text()}"
     await update.message.reply_text(txt)
 
@@ -192,9 +183,7 @@ async def check_gold_logic(bot):
             rsi = calc_rsi(closes)
             ema50 = calc_ema(closes, 50)
             upper, lower = calc_bollinger(closes)
-            # Где цена в Bollinger 0=низ, 100=верх
-            pos_in_boll = (price - lower) / (upper - lower) * 100 if upper != lower else 50
-            print(f"{name} Цена {price} RSI {rsi:.1f} EMA50 {ema50:.2f} Boll {lower:.2f}-{upper:.2f} Позиция {pos_in_boll:.0f}%", flush=True)
+            print(f"{name} Цена {price} RSI {rsi:.1f} EMA50 {ema50:.2f}", flush=True)
             keys = [k for k in list(positions.keys()) if k.startswith(name)]
             for key in keys:
                 pos = positions.get(key)
@@ -229,25 +218,24 @@ async def check_gold_logic(bot):
             amount = LOT * price
             if name in ["БИТКОИН", "ЭФИРИУМ"]:
                 amount = 500.0
-            # НОРМАЛЬНЫЙ СНАЙПЕР BUY - цена внизу + RSI низкий
-            # Было RSI<35, стало RSI<48 - теперь сигналы будут!
-            if rsi < 48 and pos_in_boll < 30 and price > ema50 - (upper-lower)*0.2:
+            # ПРАВИЛЬНО КАК ТЫ ГОВОРИШЬ:
+            # ВВЕРХ = BUY - цена выше EMA и RSI > 50 - цена растёт
+            if price > ema50 and rsi > 50:
                 n = count_for(name) + 1
                 key = f"{name} #{n}"
                 positions[key] = {"type": "BUY", "price": price, "amount": amount, "lot": LOT}
                 tp, sl = get_tp_sl(positions[key])
                 if CHAT_ID != 0:
-                    await bot.send_message(chat_id=CHAT_ID, text=f"🎯 СНАЙПЕР ПОКУПКА! {key}\nRSI {rsi:.1f} Цена {price:.2f} Boll низ {lower:.2f}\nТП {tp:.2f} СЛ {sl:.2f}\n\n{balance_text()}")
+                    await bot.send_message(chat_id=CHAT_ID, text=f"🎯 ВВЕРХ - ПОКУПКА! {key}\nRSI {rsi:.1f} Цена {price:.2f} EMA {ema50:.2f}\nТП {tp:.2f} СЛ {sl:.2f}\n\n{balance_text()}")
                 continue
-            # НОРМАЛЬНЫЙ СНАЙПЕР SELL - цена вверху + RSI высокий
-            # Было RSI>65, стало RSI>52 - теперь сигналы будут!
-            if rsi > 52 and pos_in_boll > 70 and price < ema50 + (upper-lower)*0.2:
+            # ВНИЗ = SELL - цена ниже EMA и RSI < 50 - цена падает
+            if price < ema50 and rsi < 50:
                 n = count_for(name) + 1
                 key = f"{name} #{n}"
                 positions[key] = {"type": "SELL", "price": price, "amount": amount, "lot": LOT}
                 tp, sl = get_tp_sl(positions[key])
                 if CHAT_ID != 0:
-                    await bot.send_message(chat_id=CHAT_ID, text=f"🎯 СНАЙПЕР ПРОДАЖА! {key}\nRSI {rsi:.1f} Цена {price:.2f} Boll верх {upper:.2f}\nТП {tp:.2f} СЛ {sl:.2f}\n\n{balance_text()}")
+                    await bot.send_message(chat_id=CHAT_ID, text=f"🎯 ВНИЗ - ПРОДАЖА! {key}\nRSI {rsi:.1f} Цена {price:.2f} EMA {ema50:.2f}\nТП {tp:.2f} СЛ {sl:.2f}\n\n{balance_text()}")
                 continue
         except Exception as e:
             print(f"Ошибка {name}: {e}", flush=True)
