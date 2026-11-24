@@ -1,9 +1,9 @@
-import requests, time, threading
+import requests, time, threading, os
 from bs4 import BeautifulSoup
 import telebot
 from flask import Flask
 
-# === ТВОИ ДАННЫЕ - УЖЕ ВСТАВЛЕНО ===
+# === ТВОИ ДАННЫЕ ===
 TOKEN = "9241841874:AAEzhDrKaYVetMgcyRjq3ywK2YQS0RaRib4"
 MY_ID = 8131803573
 PHONE = "0549676781"
@@ -67,10 +67,12 @@ def hunter():
 
 @bot.message_handler(commands=['start'])
 def start(m):
-    bot.send_message(m.chat.id, f"✅ Бот v3 РАБОТАЕТ!\n\n📍 Весь центр: Ришон, Холон, Бат-Ям, Тель-Авив + 8 городов\n\n🔍 Ищу 2 вида заказов:\n1. Маленькие - покраска, сборка, ТВ\n2. БОЛЬШИЕ - каблан, бригада, подряд, стройка\n\n📞 Твой номер: {PHONE}\n\nКак найду - сразу пришлю!")
+    bot.send_message(m.chat.id, f"✅ Бот v4 РАБОТАЕТ!\n\n📍 Весь центр: Ришон, Холон, Бат-Ям, Тель-Авив + 8 городов\n\n🔍 Ищу 2 вида заказов:\n1. Маленькие - покраска, сборка, ТВ\n2. БОЛЬШИЕ - каблан, бригада, подряд, стройка\n\n📞 Твой номер: {PHONE}\n\nКак найду - сразу пришлю!")
 
+# Запуск сразу, даже если Render запускает через gunicorn
 threading.Thread(target=hunter, daemon=True).start()
 threading.Thread(target=lambda: bot.infinity_polling(), daemon=True).start()
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
