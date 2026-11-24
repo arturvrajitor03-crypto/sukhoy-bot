@@ -5,7 +5,6 @@ import threading
 import time
 import traceback
 import asyncio
-import statistics
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
@@ -14,10 +13,6 @@ logging.basicConfig(level=logging.INFO)
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = int(os.getenv("CHAT_ID", "0") or "0")
 PORT = int(os.getenv("PORT", "10000"))
-BALANCE = 500.0
-START_BALANCE = 500.0
-LOT = 1.00
-MAX_PER_SYMBOL = 1
 
 SYMBOLS = {
     "ЗОЛОТО": "XAUUSDT",
@@ -26,8 +21,7 @@ SYMBOLS = {
     "НЕФТЬ": "CL=F",
 }
 BINANCE_MAP = {"XAUUSDT": "PAXGUSDT", "BTCUSDT": "BTCUSDT", "ETHUSDT": "ETHUSDT"}
-positions = {}
-last_close_time = {}
+last_signal_time = {}
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -107,64 +101,10 @@ def calc_ema(closes, period):
         ema = p * k + ema * (1 - k)
     return ema
 
-def get_tp_sl(pos):
-    entry = pos["price"]
-    if pos["type"] == "BUY":
-        return entry * 1.01, entry * 0.995
-    else:
-        return entry * 0.99, entry * 1.005
-
-def count_for(name):
-    c = 0
-    for k in positions.keys():
-        if k.startswith(name):
-            c += 1
-    return c
-
-def balance_text():
-    profit = BALANCE - START_BALANCE
-    znak = "+" if profit >= 0 else ""
-    txt = f"🎯 СЧЁТ\n\nСтарт: {START_BALANCE:.2f}$\nСейчас: {BALANCE:.2f}$\nПрибыль: {znak}{profit:.2f}$\n"
-    if positions:
-        txt += "\n--- ОТКРЫТЫЕ ---\n"
-        for name, pos in positions.items():
-            tp, sl = get_tp_sl(pos)
-            txt += f"\n{name}: {pos['type']} по {pos['price']:.2f} ТП {tp:.2f} СЛ {sl:.2f}"
-    else:
-        txt += "\nНет сделок"
-    return txt
-
 async def start(update, context):
     global CHAT_ID
     CHAT_ID = update.effective_chat.id
-    await update.message.reply_text(f"🎯 БОТ ВКЛЮЧЕН!\nВВЕРХ = BUY, ВНИЗ = SELL\n/close - закрыть все\n\n{balance_text()}\n\n/balance - деньги\n/status - позиции\n/price - цены\n/close - закрыть всё")
-
-async def balance_cmd(update, context):
-    await update.message.reply_text(balance_text())
-
-async def status_cmd(update, context):
-    await update.message.reply_text(balance_text())
-
-async def close_cmd(update, context):
-    global BALANCE
-    if not positions:
-        await update.message.reply_text("Нет открытых сделок")
-        return
-    txt = "ЗАКРЫВАЮ ВСЕ:\n"
-    for key in list(positions.keys()):
-        pos = positions[key]
-        closes = get_history(SYMBOLS.get(key.split(" #")[0], "XAUUSDT"))
-        price = closes[-1] if closes else pos["price"]
-        if pos["type"] == "BUY":
-            pnl_pct = (price - pos["price"]) / pos["price"] * 100
-        else:
-            pnl_pct = (pos["price"] - price) / pos["price"] * 100
-        pnl = pos["amount"] * pnl_pct / 100
-        BALANCE += pnl
-        txt += f"\n{key} {pos['type']} Вход {pos['price']:.2f} Выход {price:.2f} ПнЛ {pnl:+.2f}$"
-        del positions[key]
-    txt += f"\n\n{balance_text()}"
-    await update.message.reply_text(txt)
+    await update.message.reply_text("🎯 СИГНАЛЬНЫЙ БОТ ВКЛЮЧЕН!\nЯ сам НЕ торгую, только пишу сигналы.\nТы сам решаешь брать или нет.\n\n/price - цены\n/test - проверить сейчас")
 
 async def price_cmd(update, context):
     txt = "ЦЕНЫ:\n\n"
@@ -177,17 +117,21 @@ async def price_cmd(update, context):
         rsi = calc_rsi(closes)
         ema9 = calc_ema(closes, 9)
         ema21 = calc_ema(closes, 21)
-        trend = "ВВЕРХ ⬆️ BUY" if ema9 > ema21 else "ВНИЗ ⬇️ SELL"
-        txt += f"{name}: {price:.2f} | RSI {rsi:.1f} | EMA9 {ema9:.2f} EMA21 {ema21:.2f} | {trend} | Сделок: {count_for(name)}/1\n"
-    txt += f"\n{balance_text()}"
+        ema50 = calc_ema(closes, 50)
+        if ema9 > ema21 and ema21 > ema50:
+            trend = "ВВЕРХ ⬆️"
+        elif ema9 < ema21 and ema21 < ema50:
+            trend = "ВНИЗ ⬇️"
+        else:
+            trend = "БОК ➡️ ЖДЁМ"
+        txt += f"{name}: {price:.2f} | RSI {rsi:.1f} | {trend}\n"
     await update.message.reply_text(txt)
 
 async def test_cmd(update, context):
-    await check_gold_logic(context.bot)
-    await update.message.reply_text(f"🎯 ПРОВЕРКА ЗАПУЩЕНА!\n\n{balance_text()}")
+    await check_logic(context.bot, force=True)
+    await update.message.reply_text("Проверка сделана! Смотри сигналы выше, если были.")
 
-async def check_gold_logic(bot):
-    global BALANCE
+async def check_logic(bot, force=False):
     for name, sym in SYMBOLS.items():
         try:
             closes = get_history(sym)
@@ -197,102 +141,50 @@ async def check_gold_logic(bot):
             rsi = calc_rsi(closes)
             ema9 = calc_ema(closes, 9)
             ema21 = calc_ema(closes, 21)
-            # Последние 3 свечи - куда реально идёт цена
-            last3_up = closes[-1] > closes[-2] > closes[-3]
-            last3_down = closes[-1] < closes[-2] < closes[-3]
-            # НОРМАЛЬНАЯ ЛОГИКА - 3 подтверждения сразу
-            # ВВЕРХ = EMA9 выше EMA21 + цена растёт + RSI > 50
-            is_up = ema9 > ema21 and rsi > 50 and rsi < 72 and (last3_up or price > ema9)
-            # ВНИЗ = EMA9 ниже EMA21 + цена падает + RSI < 50
-            is_down = ema9 < ema21 and rsi < 50 and rsi > 28 and (last3_down or price < ema9)
-            print(f"{name} Цена {price} RSI {rsi:.1f} EMA9 {ema9:.2f} EMA21 {ema21:.2f} ВВЕРХ={is_up} ВНИЗ={is_down}", flush=True)
-            keys = [k for k in list(positions.keys()) if k.startswith(name)]
-            for key in keys:
-                pos = positions.get(key)
-                if not pos:
-                    continue
-                entry = pos["price"]
-                amount = pos["amount"]
-                if pos["type"] == "BUY":
-                    pnl_pct = (price - entry) / entry * 100
-                else:
-                    pnl_pct = (entry - price) / entry * 100
-                if pnl_pct >= 1.0:
-                    profit = amount * pnl_pct / 100
-                    BALANCE += profit
-                    last_close_time[name] = time.time()
-                    if CHAT_ID != 0:
-                        await bot.send_message(chat_id=CHAT_ID, text=f"ПЛЮС! {key} {pos['type']}\nВход {entry:.2f} Выход {price:.2f}\nПрибыль +{profit:.2f}$\n\n{balance_text()}")
-                    del positions[key]
-                    continue
-                if pnl_pct <= -0.5:
-                    loss = amount * pnl_pct / 100
-                    BALANCE += loss
-                    last_close_time[name] = time.time()
-                    if CHAT_ID != 0:
-                        await bot.send_message(chat_id=CHAT_ID, text=f"СТОП {key} {pos['type']}\nВход {entry:.2f} Выход {price:.2f}\nУбыток {loss:.2f}$\n\n{balance_text()}")
-                    del positions[key]
-                    continue
-                # ПЕРЕВОРОТ - тренд поменялся
-                if pos["type"] == "SELL" and is_up:
-                    loss = amount * pnl_pct / 100
-                    BALANCE += loss
-                    if CHAT_ID != 0:
-                        await bot.send_message(chat_id=CHAT_ID, text=f"🔄 ПЕРЕВОРОТ! {key} SELL закрыт, тренд стал ВВЕРХ\nВход {entry:.2f} Выход {price:.2f} ПнЛ {loss:+.2f}$")
-                    del positions[key]
-                    continue
-                if pos["type"] == "BUY" and is_down:
-                    loss = amount * pnl_pct / 100
-                    BALANCE += loss
-                    if CHAT_ID != 0:
-                        await bot.send_message(chat_id=CHAT_ID, text=f"🔄 ПЕРЕВОРОТ! {key} BUY закрыт, тренд стал ВНИЗ\nВход {entry:.2f} Выход {price:.2f} ПнЛ {loss:+.2f}$")
-                    del positions[key]
-                    continue
-            if count_for(name) >= MAX_PER_SYMBOL:
+            ema50 = calc_ema(closes, 50)
+            print(f"{name} Цена {price} RSI {rsi:.1f} EMA9 {ema9:.2f} EMA21 {ema21:.2f} EMA50 {ema50:.2f}", flush=True)
+
+            # Пауза 2 часа между сигналами по одной монете
+            if not force and name in last_signal_time and time.time() - last_signal_time[name] < 7200:
                 continue
-            if name in last_close_time and time.time() - last_close_time[name] < 300:
-                continue
-            amount = LOT * price
-            if name in ["БИТКОИН", "ЭФИРИУМ"]:
-                amount = 500.0
+
+            # ТОЛЬКО СИЛЬНЫЙ СИГНАЛ
+            is_up = ema9 > ema21 and ema21 > ema50 and rsi > 40 and rsi < 60 and price > ema21
+            is_down = ema9 < ema21 and ema21 < ema50 and rsi > 40 and rsi < 60 and price < ema21
+
             if is_up:
-                n = count_for(name) + 1
-                key = f"{name} #{n}"
-                positions[key] = {"type": "BUY", "price": price, "amount": amount, "lot": LOT}
-                tp, sl = get_tp_sl(positions[key])
+                last_signal_time[name] = time.time()
+                tp = price * 1.015
+                sl = price * 0.995
                 if CHAT_ID != 0:
-                    await bot.send_message(chat_id=CHAT_ID, text=f"🎯 ВВЕРХ - ПОКУПКА! {key}\nRSI {rsi:.1f} Цена {price:.2f} EMA9 {ema9:.2f} EMA21 {ema21:.2f}\nТП {tp:.2f} СЛ {sl:.2f}\n\n{balance_text()}")
+                    await bot.send_message(chat_id=CHAT_ID, text=f"🎯 СИГНАЛ ВВЕРХ - {name} BUY\nЦена {price:.2f} RSI {rsi:.1f}\nEMA9 {ema9:.2f} EMA21 {ema21:.2f} EMA50 {ema50:.2f}\nЕсли берёшь: ТП {tp:.2f} СЛ {sl:.2f}\nЯ сам НЕ открыл, решаешь ты!")
                 continue
             if is_down:
-                n = count_for(name) + 1
-                key = f"{name} #{n}"
-                positions[key] = {"type": "SELL", "price": price, "amount": amount, "lot": LOT}
-                tp, sl = get_tp_sl(positions[key])
+                last_signal_time[name] = time.time()
+                tp = price * 0.985
+                sl = price * 1.005
                 if CHAT_ID != 0:
-                    await bot.send_message(chat_id=CHAT_ID, text=f"🎯 ВНИЗ - ПРОДАЖА! {key}\nRSI {rsi:.1f} Цена {price:.2f} EMA9 {ema9:.2f} EMA21 {ema21:.2f}\nТП {tp:.2f} СЛ {sl:.2f}\n\n{balance_text()}")
+                    await bot.send_message(chat_id=CHAT_ID, text=f"🎯 СИГНАЛ ВНИЗ - {name} SELL\nЦена {price:.2f} RSI {rsi:.1f}\nEMA9 {ema9:.2f} EMA21 {ema21:.2f} EMA50 {ema50:.2f}\nЕсли берёшь: ТП {tp:.2f} СЛ {sl:.2f}\nЯ сам НЕ открыл, решаешь ты!")
                 continue
         except Exception as e:
             print(f"Ошибка {name}: {e}", flush=True)
 
-async def check_gold_job(context):
-    await check_gold_logic(context.bot)
+async def check_job(context):
+    await check_logic(context.bot)
 
 def run_bot():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     while True:
         try:
-            print("Запускаем БОТА...", flush=True)
+            print("Запускаем СИГНАЛЬНОГО БОТА...", flush=True)
             app = ApplicationBuilder().token(TOKEN).build()
             app.add_handler(CommandHandler("start", start))
             app.add_handler(CommandHandler("price", price_cmd))
-            app.add_handler(CommandHandler("status", status_cmd))
-            app.add_handler(CommandHandler("balance", balance_cmd))
             app.add_handler(CommandHandler("test", test_cmd))
-            app.add_handler(CommandHandler("close", close_cmd))
             if app.job_queue:
-                app.job_queue.run_repeating(check_gold_job, interval=60, first=5)
-            print("БОТ запущен!", flush=True)
+                app.job_queue.run_repeating(check_job, interval=300, first=5)
+            print("СИГНАЛЬНЫЙ БОТ запущен!", flush=True)
             app.run_polling(drop_pending_updates=True, stop_signals=None)
         except Exception as e:
             print(f"Бот упал: {e}", flush=True)
