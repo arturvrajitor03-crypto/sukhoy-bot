@@ -25,6 +25,9 @@ SYMBOLS = {
     "ЭФИРИУМ": "ETHUSDT",
     "НЕФТЬ": "CL=F",
 }
+# Для Binance у золота другое имя
+BINANCE_MAP = {"XAUUSDT": "PAXGUSDT", "BTCUSDT": "BTCUSDT", "ETHUSDT": "ETHUSDT"}
+
 positions = {}
 last_close_time = {}
 
@@ -39,22 +42,49 @@ class Handler(BaseHTTPRequestHandler):
 def get_history(symbol):
     if symbol == "CL=F":
         try:
-            url = "https://query1.finance.yahoo.com/v8/finance/chart/CL=F?interval=15m&range=1d"
+            url = "https://query1.finance.yahoo.com/v8/finance/chart/CL=F?interval=15m&range=5d"
             headers = {"User-Agent": "Mozilla/5.0"}
             r = requests.get(url, timeout=10, headers=headers).json()
             closes = r["chart"]["result"][0]["indicators"]["quote"][0]["close"]
             closes = [float(x) for x in closes if x is not None]
             return closes
-        except Exception:
+        except Exception as e:
+            print(f"Нефть ошибка: {e}")
             return []
+    # 1 ПОПЫТКА - Bybit 15м как на твоём графике
     try:
         url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval=15&limit=200"
         r = requests.get(url, timeout=10).json()
-        closes = [float(x[4]) for x in r["result"]["list"][::-1]]
+        if r.get("result") and r["result"].get("list"):
+            closes = [float(x[4]) for x in r["result"]["list"][::-1]]
+            if len(closes) > 50:
+                print(f"{symbol} - Bybit OK {len(closes)} свечей")
+                return closes
+    except Exception as e:
+        print(f"Bybit {symbol} ошибка: {e}")
+    # 2 ПОПЫТКА - Binance Vision
+    try:
+        bsym = BINANCE_MAP.get(symbol, symbol)
+        url = f"https://data-api.binance.vision/api/v3/klines?symbol={bsym}&interval=15m&limit=200"
+        r = requests.get(url, timeout=10).json()
+        closes = [float(x[4]) for x in r]
         if len(closes) > 50:
+            print(f"{symbol} - Binance Vision OK")
             return closes
     except Exception as e:
-        print(f"Bybit ошибка {symbol}: {e}")
+        print(f"Binance Vision {symbol} ошибка: {e}")
+    # 3 ПОПЫТКА - Binance US
+    try:
+        bsym = BINANCE_MAP.get(symbol, symbol)
+        url = f"https://api.binance.us/api/v3/klines?symbol={bsym}&interval=15m&limit=200"
+        r = requests.get(url, timeout=10).json()
+        closes = [float(x[4]) for x in r]
+        if len(closes) > 50:
+            print(f"{symbol} - Binance US OK")
+            return closes
+    except Exception as e:
+        print(f"Binance US {symbol} ошибка: {e}")
+    print(f"{symbol} - НЕТ ДАННЫХ ниоткуда!")
     return []
 
 def calc_rsi(closes, period=14):
@@ -72,7 +102,7 @@ def calc_rsi(closes, period=14):
         ag = (ag * (period-1) + gains[i]) / period
         al = (al * (period-1) + losses[i]) / period
     if al == 0:
-        return 95
+        return 90
     rs = ag / al
     return 100 - (100 / (1 + rs))
 
@@ -125,7 +155,7 @@ def balance_text():
 async def start(update, context):
     global CHAT_ID
     CHAT_ID = update.effective_chat.id
-    await update.message.reply_text(f"🎯 СНАЙПЕР БОТ ВКЛЮЧЕН! Проверка каждую минуту!\nСам решает купить или продать! График Bybit 15м\n\n{balance_text()}\n\n/balance - деньги\n/status - позиции\n/price - цены")
+    await update.message.reply_text(f"🎯 СНАЙПЕР БОТ ВКЛЮЧЕН! Проверка каждую минуту!\nBUY внизу, SELL вверху!\n\n{balance_text()}\n\n/balance - деньги\n/status - позиции\n/price - цены")
 
 async def balance_cmd(update, context):
     await update.message.reply_text(balance_text())
@@ -160,9 +190,11 @@ async def check_gold_logic(bot):
                 continue
             price = closes[-1]
             rsi = calc_rsi(closes)
-            ema200 = calc_ema(closes, 200)
+            ema50 = calc_ema(closes, 50)
             upper, lower = calc_bollinger(closes)
-            print(f"{name} Цена {price} RSI {rsi:.1f} EMA200 {ema200:.2f} Boll {lower:.2f}-{upper:.2f}", flush=True)
+            # Где цена в Bollinger 0=низ, 100=верх
+            pos_in_boll = (price - lower) / (upper - lower) * 100 if upper != lower else 50
+            print(f"{name} Цена {price} RSI {rsi:.1f} EMA50 {ema50:.2f} Boll {lower:.2f}-{upper:.2f} Позиция {pos_in_boll:.0f}%", flush=True)
             keys = [k for k in list(positions.keys()) if k.startswith(name)]
             for key in keys:
                 pos = positions.get(key)
@@ -193,13 +225,13 @@ async def check_gold_logic(bot):
             if count_for(name) >= MAX_PER_SYMBOL:
                 continue
             if name in last_close_time and time.time() - last_close_time[name] < 1800:
-                print(f"{name} ПАУЗА - ждём 30 мин после прошлой сделки", flush=True)
                 continue
             amount = LOT * price
             if name in ["БИТКОИН", "ЭФИРИУМ"]:
                 amount = 500.0
-            # СНАЙПЕР BUY - цена внизу Bollinger + RSI низкий + выше EMA
-            if rsi < 35 and rsi > 5 and price <= lower + (upper-lower)*0.15 and price > ema200:
+            # НОРМАЛЬНЫЙ СНАЙПЕР BUY - цена внизу + RSI низкий
+            # Было RSI<35, стало RSI<48 - теперь сигналы будут!
+            if rsi < 48 and pos_in_boll < 30 and price > ema50 - (upper-lower)*0.2:
                 n = count_for(name) + 1
                 key = f"{name} #{n}"
                 positions[key] = {"type": "BUY", "price": price, "amount": amount, "lot": LOT}
@@ -207,8 +239,9 @@ async def check_gold_logic(bot):
                 if CHAT_ID != 0:
                     await bot.send_message(chat_id=CHAT_ID, text=f"🎯 СНАЙПЕР ПОКУПКА! {key}\nRSI {rsi:.1f} Цена {price:.2f} Boll низ {lower:.2f}\nТП {tp:.2f} СЛ {sl:.2f}\n\n{balance_text()}")
                 continue
-            # СНАЙПЕР SELL - цена вверху Bollinger + RSI высокий + ниже EMA
-            if rsi > 65 and rsi < 90 and price >= upper - (upper-lower)*0.15 and price < ema200:
+            # НОРМАЛЬНЫЙ СНАЙПЕР SELL - цена вверху + RSI высокий
+            # Было RSI>65, стало RSI>52 - теперь сигналы будут!
+            if rsi > 52 and pos_in_boll > 70 and price < ema50 + (upper-lower)*0.2:
                 n = count_for(name) + 1
                 key = f"{name} #{n}"
                 positions[key] = {"type": "SELL", "price": price, "amount": amount, "lot": LOT}
