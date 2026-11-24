@@ -5,6 +5,7 @@ import threading
 import time
 import traceback
 import asyncio
+import statistics
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
@@ -86,6 +87,17 @@ def calc_ema(closes, period):
         ema = p * k + ema * (1 - k)
     return ema
 
+# СНАЙПЕР - BOLLINGER ДЛЯ ТОЧНОСТИ
+def calc_bollinger(closes, period=20):
+    if len(closes) < period:
+        return closes[-1], closes[-1]
+    last20 = closes[-period:]
+    mid = sum(last20) / period
+    std = statistics.pstdev(last20)
+    upper = mid + 2 * std
+    lower = mid - 2 * std
+    return upper, lower
+
 def get_tp_sl(pos):
     entry = pos["price"]
     if pos["type"] == "BUY":
@@ -103,7 +115,7 @@ def count_for(name):
 def balance_text():
     profit = BALANCE - START_BALANCE
     znak = "+" if profit >= 0 else ""
-    txt = f"ТУРБО СЧЁТ - 8 СДЕЛОК MAX\n\nСтарт: {START_BALANCE:.2f}$\nСейчас: {BALANCE:.2f}$\nПрибыль: {znak}{profit:.2f}$\n"
+    txt = f"🎯 СНАЙПЕР СЧЁТ - 8 СДЕЛОК MAX\n\nСтарт: {START_BALANCE:.2f}$\nСейчас: {BALANCE:.2f}$\nПрибыль: {znak}{profit:.2f}$\n"
     if positions:
         txt += "\n--- ОТКРЫТЫЕ ---\n"
         for name, pos in positions.items():
@@ -116,7 +128,7 @@ def balance_text():
 async def start(update, context):
     global CHAT_ID
     CHAT_ID = update.effective_chat.id
-    await update.message.reply_text(f"ТУРБО БОТ ВКЛЮЧЕН! Проверка каждую минуту!\nСам открывает сделки!\n\n{balance_text()}\n\n/balance - деньги\n/status - позиции\n/price - цены")
+    await update.message.reply_text(f"🎯 СНАЙПЕР БОТ ВКЛЮЧЕН! Проверка каждую минуту!\nСам решает купить или продать!\n\n{balance_text()}\n\n/balance - деньги\n/status - позиции\n/price - цены")
 
 async def balance_cmd(update, context):
     await update.message.reply_text(balance_text())
@@ -139,7 +151,7 @@ async def price_cmd(update, context):
 
 async def test_cmd(update, context):
     await check_gold_logic(context.bot)
-    await update.message.reply_text(f"ТУРБО ЗАПУСТИЛ ПРОВЕРКУ!\n\n{balance_text()}")
+    await update.message.reply_text(f"🎯 СНАЙПЕР ЗАПУСТИЛ ПРОВЕРКУ!\n\n{balance_text()}")
 
 async def check_gold_logic(bot):
     global BALANCE
@@ -151,7 +163,8 @@ async def check_gold_logic(bot):
             price = closes[-1]
             rsi = calc_rsi(closes)
             ema200 = calc_ema(closes, 50)
-            print(f"{name} Цена {price} RSI {rsi:.1f} Сделок {count_for(name)}", flush=True)
+            upper, lower = calc_bollinger(closes)
+            print(f"{name} Цена {price} RSI {rsi:.1f} Boll {lower:.2f}-{upper:.2f} Сделок {count_for(name)}", flush=True)
             keys = [k for k in list(positions.keys()) if k.startswith(name)]
             for key in keys:
                 pos = positions.get(key)
@@ -182,22 +195,25 @@ async def check_gold_logic(bot):
             amount = LOT * price
             if name in ["БИТКОИН", "ЭФИРИУМ"]:
                 amount = 500.0
-            # ТУРБО: очень простые условия - только тренд + RSI
-            if price > ema200 and rsi < 55:
+
+            # СНАЙПЕР - ВЕРИТ ЧТО МОЖНО КУПИТЬ -> ПОКУПАЕТ
+            if rsi < 35 and price <= lower + (upper-lower)*0.1 and price > ema200:
                 n = count_for(name) + 1
                 key = f"{name} #{n}"
                 positions[key] = {"type": "BUY", "price": price, "amount": amount, "lot": LOT}
                 tp, sl = get_tp_sl(positions[key])
                 if CHAT_ID != 0:
-                    await bot.send_message(chat_id=CHAT_ID, text=f"ТУРБО ПОКУПКА! {key}\nRSI {rsi:.1f} Цена {price:.2f}\nТП {tp:.2f} СЛ {sl:.2f}\n\n{balance_text()}")
+                    await bot.send_message(chat_id=CHAT_ID, text=f"🎯 СНАЙПЕР ПОКУПКА! {key}\nRSI {rsi:.1f} Цена {price:.2f} Boll низ {lower:.2f}\nТП {tp:.2f} СЛ {sl:.2f}\n\n{balance_text()}")
                 continue
-            if price < ema200 and rsi > 45:
+
+            # СНАЙПЕР - ВЕРИТ ЧТО МОЖНО ПРОДАТЬ -> ПРОДАЁТ
+            if rsi > 65 and price >= upper - (upper-lower)*0.1 and price < ema200:
                 n = count_for(name) + 1
                 key = f"{name} #{n}"
                 positions[key] = {"type": "SELL", "price": price, "amount": amount, "lot": LOT}
                 tp, sl = get_tp_sl(positions[key])
                 if CHAT_ID != 0:
-                    await bot.send_message(chat_id=CHAT_ID, text=f"ТУРБО ПРОДАЖА! {key}\nRSI {rsi:.1f} Цена {price:.2f}\nТП {tp:.2f} СЛ {sl:.2f}\n\n{balance_text()}")
+                    await bot.send_message(chat_id=CHAT_ID, text=f"🎯 СНАЙПЕР ПРОДАЖА! {key}\nRSI {rsi:.1f} Цена {price:.2f} Boll верх {upper:.2f}\nТП {tp:.2f} СЛ {sl:.2f}\n\n{balance_text()}")
                 continue
         except Exception as e:
             print(f"Ошибка {name}: {e}", flush=True)
@@ -210,7 +226,7 @@ def run_bot():
     asyncio.set_event_loop(loop)
     while True:
         try:
-            print("Запускаем ТУРБО...", flush=True)
+            print("Запускаем СНАЙПЕРА...", flush=True)
             app = ApplicationBuilder().token(TOKEN).build()
             app.add_handler(CommandHandler("start", start))
             app.add_handler(CommandHandler("price", price_cmd))
@@ -219,7 +235,7 @@ def run_bot():
             app.add_handler(CommandHandler("test", test_cmd))
             if app.job_queue:
                 app.job_queue.run_repeating(check_gold_job, interval=60, first=5)
-            print("ТУРБО запущен!", flush=True)
+            print("СНАЙПЕР запущен!", flush=True)
             app.run_polling(drop_pending_updates=True, stop_signals=None)
         except Exception as e:
             print(f"Бот упал: {e}", flush=True)
